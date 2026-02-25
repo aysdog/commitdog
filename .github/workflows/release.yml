@@ -1,0 +1,55 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build and release
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            asset_name: commitdog-linux-amd64
+          - goos: linux
+            goarch: arm64
+            asset_name: commitdog-linux-arm64
+          - goos: darwin
+            goarch: amd64
+            asset_name: commitdog-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            asset_name: commitdog-darwin-arm64
+          - goos: windows
+            goarch: amd64
+            asset_name: commitdog-windows-amd64.exe
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -ldflags="-s -w" -o ${{ matrix.asset_name }} .
+
+      - name: upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset_name }}
+          generate_release_notes: true
