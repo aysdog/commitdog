@@ -121,7 +121,7 @@ func runPush(remote, branch string) error {
 func sanitizeMessage(s string) string {
 	// strip null bytes
 	s = strings.ReplaceAll(s, "\x00", "")
-	// trim leading/trailing whitespace
+
 	s = strings.TrimSpace(s)
 	// collapse internal newlines to space (commit -m takes first line)
 	s = strings.ReplaceAll(s, "\n", " ")
