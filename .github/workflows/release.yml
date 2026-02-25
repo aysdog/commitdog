@@ -12,8 +12,10 @@ jobs:
   build:
     name: build and release
     runs-on: ubuntu-latest
+    continue-on-error: false
 
     strategy:
+      fail-fast: false
       matrix:
         include:
           - goos: linux
@@ -53,3 +55,5 @@ jobs:
         with:
           files: ${{ matrix.asset_name }}
           generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
