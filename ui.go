@@ -99,7 +99,7 @@ func askPush() {
 	for {
 		input := readLine()
 		switch input {
-		case "y", "yes":
+		case "y", "yes", "":
 			fmt.Printf("  pushing...")
 			if err := runPush(remote, branch); err != nil {
 				fmt.Printf("\n  push failed: %s\n", err)
