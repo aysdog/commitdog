@@ -107,7 +107,7 @@ func askPush() {
 				fmt.Printf("\n  ✓ pushed to %s/%s\n", remote, branch)
 			}
 			return
-		case "n", "no", "":
+		case "n", "no":
 			fmt.Println("  skipped. push it yourself when ready.")
 			return
 		default:
