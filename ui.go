@@ -94,7 +94,7 @@ func askPush() {
 
 	remote := remotes[0] // default to first remote (usually "origin")
 
-	fmt.Printf("\n  push to %s/%s? [y/n] › ", remote, branch)
+	fmt.Printf("\n  push to %s/%s? [Y/n] › ", remote, branch)
 
 	for {
 		input := readLine()
@@ -111,7 +111,7 @@ func askPush() {
 			fmt.Println("  skipped. push it yourself when ready.")
 			return
 		default:
-			fmt.Printf("  y or n › ")
+			fmt.Printf("  Y or n › ")
 		}
 	}
 }
