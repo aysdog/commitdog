@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const version = "0.1.0"
+const version = "0.1.1"
 
 func main() {
 	if len(os.Args) > 1 {
@@ -16,15 +16,25 @@ func main() {
 		case "--help", "-h":
 			printHelp()
 			os.Exit(0)
+		case "setup":
+			runSetup()
+			os.Exit(0)
+		case "init":
+			runInit()
+			os.Exit(0)
 		default:
-			fmt.Fprintf(os.Stderr, "unknown flag: %s\n", os.Args[1])
+			fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
+			fmt.Fprintf(os.Stderr, "run 'commitdog --help' for usage.\n")
 			os.Exit(1)
 		}
 	}
 
+	// check email on every run — silent if already set
+	checkFirstRun()
+
 	// verify we're inside a git repo
 	if err := verifyGitRepo(); err != nil {
-		fatal("not a git repository (or no git installed)")
+		fatal("not a git repository. run 'commitdog init' to create one.")
 	}
 
 	// get staged diff
@@ -34,7 +44,7 @@ func main() {
 	}
 
 	if diff == "" {
-		fatal("nothing staged. run 'git add' first.")
+		fatal("nothing staged. run 'git add .' first.")
 	}
 
 	// analyze the diff
@@ -50,7 +60,7 @@ func main() {
 	// show picker
 	chosen := pickSuggestion(suggestions)
 	if chosen == "" {
-		fmt.Println("aborted.")
+		fmt.Println("  aborted.")
 		os.Exit(0)
 	}
 
@@ -59,7 +69,7 @@ func main() {
 		fatal("commit failed: %v", err)
 	}
 
-	fmt.Printf("\n✓ committed: %s\n", chosen)
+	fmt.Printf("\n  ✓ committed: %s\n", chosen)
 
 	// ask to push
 	askPush()
@@ -70,20 +80,25 @@ func printHelp() {
 
 usage:
   commitdog          generate commit message from staged diff
+  commitdog init     create a new GitHub repo and do the first push
+  commitdog setup    configure email and GitHub token
   commitdog -v       show version
   commitdog -h       show this help
 
-how it works:
-  1. reads your staged git diff
-  2. analyzes changed files and patterns
-  3. suggests 2-3 conventional commit messages
-  4. you pick one, it commits
-  5. optionally pushes for you
+workflow:
+  first time:
+    commitdog setup  ← set email + GitHub token once
+    mkdir my-project && cd my-project
+    commitdog init   ← creates repo on GitHub, first commit, push
 
-no ai. no network. no telemetry. just works.`)
+  daily:
+    git add .
+    commitdog        ← suggests message, commits, asks to push
+
+no ai. no network (except init). no telemetry. just works.`)
 }
 
 func fatal(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "commitdog: "+format+"\n", args...)
+	fmt.Fprintf(os.Stderr, "\n  commitdog: "+format+"\n\n", args...)
 	os.Exit(1)
 }
