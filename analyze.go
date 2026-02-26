@@ -6,17 +6,16 @@ import (
 	"strings"
 )
 
-// analysis holds everything we know about a staged diff.
 type analysis struct {
 	filesChanged  int
 	filesAdded    []string
 	filesDeleted  []string
 	filesModified []string
-	primaryScope  string   // e.g. "auth", "api", "db"
-	commitType    string   // feat/fix/refactor/docs/test/chore/style
-	addedFuncs    []string // function/method names added
-	removedFuncs  []string // function/method names removed
-	patterns      []string // detected patterns: error-handling, logging, etc
+	primaryScope  string
+	commitType    string
+	addedFuncs    []string
+	removedFuncs  []string
+	patterns      []string
 	isMigration   bool
 	isDepUpdate   bool
 	isDocsOnly    bool
@@ -24,7 +23,6 @@ type analysis struct {
 	isConfigOnly  bool
 }
 
-// file categories
 var (
 	testFilePatterns = []string{
 		"_test.go", ".test.ts", ".test.js", ".test.tsx", ".test.jsx",
@@ -52,30 +50,21 @@ var (
 	}
 )
 
-// regex patterns for extracting function names from diffs
 var (
-	// Go
-	reFuncGo = regexp.MustCompile(`^\+func\s+(?:\(\w+\s+\*?\w+\)\s+)?(\w+)\s*\(`)
-	// JS/TS
-	reFuncJS  = regexp.MustCompile(`^\+(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(`)
-	reArrowJS = regexp.MustCompile(`^\+(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\(`)
-	// Python
-	reFuncPy  = regexp.MustCompile(`^\+def\s+(\w+)\s*\(`)
-	reClassPy = regexp.MustCompile(`^\+class\s+(\w+)[\s:(]`)
-	// Ruby
-	reFuncRb = regexp.MustCompile(`^\+\s*def\s+(\w+)`)
-	// Rust
-	reFuncRs = regexp.MustCompile(`^\+(?:pub\s+)?fn\s+(\w+)\s*[<(]`)
-	// Java/Kotlin
+	reFuncGo   = regexp.MustCompile(`^\+func\s+(?:\(\w+\s+\*?\w+\)\s+)?(\w+)\s*\(`)
+	reFuncJS   = regexp.MustCompile(`^\+(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(`)
+	reArrowJS  = regexp.MustCompile(`^\+(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\(`)
+	reFuncPy   = regexp.MustCompile(`^\+def\s+(\w+)\s*\(`)
+	reClassPy  = regexp.MustCompile(`^\+class\s+(\w+)[\s:(]`)
+	reFuncRb   = regexp.MustCompile(`^\+\s*def\s+(\w+)`)
+	reFuncRs   = regexp.MustCompile(`^\+(?:pub\s+)?fn\s+(\w+)\s*[<(]`)
 	reFuncJava = regexp.MustCompile(`^\+\s*(?:public|private|protected|static|\s)+\s+\w+\s+(\w+)\s*\(`)
 
-	// removed functions (same patterns with minus)
 	reRmFuncGo = regexp.MustCompile(`^-func\s+(?:\(\w+\s+\*?\w+\)\s+)?(\w+)\s*\(`)
 	reRmFuncJS = regexp.MustCompile(`^-(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(`)
 	reRmFuncPy = regexp.MustCompile(`^-def\s+(\w+)\s*\(`)
 	reRmFuncRs = regexp.MustCompile(`^-(?:pub\s+)?fn\s+(\w+)\s*[<(]`)
 
-	// patterns
 	reErrorHandling = regexp.MustCompile(`^\+.*(?:err|error|Error|exception|Exception|catch|rescue)\b`)
 	reLogging       = regexp.MustCompile(`^\+.*(?:log\.|logger\.|console\.log|fmt\.Print|println!|logging\.)`)
 	reRmLogging     = regexp.MustCompile(`^-.*(?:console\.log|fmt\.Print|println!|log\.Debug)`)
@@ -83,7 +72,6 @@ var (
 	reComment       = regexp.MustCompile(`^\+\s*(?://|#|/\*|\*)`)
 )
 
-// analyzeDiff parses a raw git diff and returns structured analysis.
 func analyzeDiff(diff string) analysis {
 	a := analysis{}
 
@@ -91,7 +79,6 @@ func analyzeDiff(diff string) analysis {
 	currentFile := ""
 
 	for _, line := range lines {
-		// detect file header: +++ b/path/to/file
 		if strings.HasPrefix(line, "+++ b/") {
 			currentFile = strings.TrimPrefix(line, "+++ b/")
 			currentFile = strings.TrimSpace(currentFile)
@@ -99,7 +86,6 @@ func analyzeDiff(diff string) analysis {
 			continue
 		}
 
-		// skip file meta lines
 		if strings.HasPrefix(line, "---") ||
 			strings.HasPrefix(line, "diff ") ||
 			strings.HasPrefix(line, "index ") ||
@@ -107,17 +93,14 @@ func analyzeDiff(diff string) analysis {
 			continue
 		}
 
-		// extract added functions
 		if funcs := extractFuncName(line, currentFile, true); funcs != "" {
 			a.addedFuncs = appendUnique(a.addedFuncs, funcs)
 		}
 
-		// extract removed functions
 		if funcs := extractFuncName(line, currentFile, false); funcs != "" {
 			a.removedFuncs = appendUnique(a.removedFuncs, funcs)
 		}
 
-		// detect patterns
 		if reErrorHandling.MatchString(line) {
 			a.patterns = appendUnique(a.patterns, "error-handling")
 		}
@@ -142,12 +125,10 @@ func analyzeDiff(diff string) analysis {
 	return a
 }
 
-// categorizeFile sorts a file into added/deleted/modified and flags special types.
 func categorizeFile(a *analysis, path string) {
 	base := filepath.Base(path)
 	lower := strings.ToLower(path)
 
-	// skip lock files from meaningful analysis
 	for _, p := range lockFilePatterns {
 		if strings.HasSuffix(lower, strings.ToLower(p)) || base == p {
 			a.isDepUpdate = true
@@ -155,21 +136,18 @@ func categorizeFile(a *analysis, path string) {
 		}
 	}
 
-	// migration
 	for _, p := range migrationPatterns {
 		if strings.Contains(lower, p) {
 			a.isMigration = true
 		}
 	}
 
-	// dep files
 	for _, p := range depFilePatterns {
 		if base == p {
 			a.isDepUpdate = true
 		}
 	}
 
-	// categorize by type
 	if isTestFile(path) {
 		a.filesModified = appendUnique(a.filesModified, path)
 		a.isTestOnly = true
@@ -187,7 +165,6 @@ func categorizeFile(a *analysis, path string) {
 	}
 
 	a.filesModified = appendUnique(a.filesModified, path)
-	// reset "only" flags if we have real source files
 	a.isTestOnly = false
 	a.isDocsOnly = false
 	a.isConfigOnly = false
@@ -228,7 +205,6 @@ func extractFuncName(line, file string, added bool) string {
 	for _, re := range patterns {
 		if m := re.FindStringSubmatch(line); len(m) > 1 {
 			name := m[1]
-			// skip internal/generated names
 			if len(name) <= 1 || strings.HasPrefix(name, "_") {
 				continue
 			}
@@ -238,14 +214,12 @@ func extractFuncName(line, file string, added bool) string {
 	return ""
 }
 
-// inferScope extracts the most meaningful module/package from changed files.
 func inferScope(a analysis) string {
 	all := append(append(a.filesAdded, a.filesDeleted...), a.filesModified...)
 	if len(all) == 0 {
 		return ""
 	}
 
-	// collect directory segments and score them
 	scores := map[string]int{}
 	for _, f := range all {
 		parts := strings.Split(filepath.Dir(f), "/")
@@ -258,10 +232,8 @@ func inferScope(a analysis) string {
 			}
 			scores[p]++
 		}
-		// also score the filename stem
 		base := strings.TrimSuffix(filepath.Base(f), filepath.Ext(f))
 		base = strings.ToLower(base)
-		// strip test suffixes
 		base = strings.TrimSuffix(base, "_test")
 		base = strings.TrimSuffix(base, ".test")
 		base = strings.TrimSuffix(base, ".spec")
@@ -270,7 +242,6 @@ func inferScope(a analysis) string {
 		}
 	}
 
-	// pick highest scored scope
 	best := ""
 	bestScore := 0
 	for k, v := range scores {
@@ -280,7 +251,6 @@ func inferScope(a analysis) string {
 		}
 	}
 
-	// truncate long scope names
 	if len(best) > 20 {
 		best = best[:20]
 	}
@@ -288,7 +258,6 @@ func inferScope(a analysis) string {
 	return best
 }
 
-// inferType determines the conventional commit type.
 func inferType(a analysis) string {
 	if a.isDepUpdate && len(a.filesModified) <= 2 {
 		return "chore"
@@ -325,8 +294,6 @@ func inferType(a analysis) string {
 	}
 	return "refactor"
 }
-
-// helpers
 
 func isTestFile(path string) bool {
 	lower := strings.ToLower(path)

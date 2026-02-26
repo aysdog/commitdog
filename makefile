@@ -7,7 +7,6 @@ build:
 install:
 	go install -ldflags="-s -w" .
 
-# cross-compile all platforms
 release:
 	mkdir -p dist
 	GOOS=linux   GOARCH=amd64  go build -ldflags="-s -w" -o dist/$(BINARY)-linux-amd64 .

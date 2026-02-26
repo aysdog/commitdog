@@ -119,7 +119,6 @@ func githubRequest(method, path string, token string, payload interface{}) ([]by
 	}
 
 	if resp.StatusCode >= 400 {
-		// extract message from GitHub error response
 		var errResp struct {
 			Message string `json:"message"`
 		}
@@ -133,7 +132,6 @@ func githubRequest(method, path string, token string, payload interface{}) ([]by
 	return respBody, nil
 }
 
-// getGitEmail reads git user.email config.
 func getGitEmail() string {
 	cmd := exec.Command("git", "config", "--global", "user.email")
 	var out bytes.Buffer
@@ -144,7 +142,6 @@ func getGitEmail() string {
 	return strings.TrimSpace(out.String())
 }
 
-// setGitEmail sets git user.email globally.
 func setGitEmail(email string) error {
 	email = sanitizeInput(email)
 	if email == "" || !strings.Contains(email, "@") {
@@ -153,12 +150,9 @@ func setGitEmail(email string) error {
 	return exec.Command("git", "config", "--global", "user.email", email).Run()
 }
 
-// hasSSHKey checks if user has an SSH key configured for GitHub.
 func hasSSHKey() bool {
 	cmd := exec.Command("ssh", "-T", "git@github.com", "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes")
 	err := cmd.Run()
-	// ssh returns exit code 1 with "Hi username!" on success
-	// exit code 255 means connection failed
 	if err != nil {
 		exitErr, ok := err.(*exec.ExitError)
 		if ok && exitErr.ExitCode() == 1 {

@@ -1,20 +1,15 @@
-# compiled binary
 commitdog
 commitdog.exe
 
-# build output
 dist/
 
-# os
 .DS_Store
 Thumbs.db
 
-# editor
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# go
 *.test
 *.out

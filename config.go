@@ -21,7 +21,6 @@ func configPath() string {
 	return filepath.Join(home, ".config", "commitdog", "config.toml")
 }
 
-// loadConfig reads config from disk. returns empty config if not found.
 func loadConfig() config {
 	path := configPath()
 	f, err := os.Open(path)
@@ -44,23 +43,19 @@ func loadConfig() config {
 	return c
 }
 
-// saveConfig writes config to disk.
 func saveConfig(c config) error {
 	path := configPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
 
-	// sanitize before saving
 	c.Token = sanitizeInput(c.Token)
 	c.Email = sanitizeInput(c.Email)
 
 	content := fmt.Sprintf("token = \"%s\"\nemail = \"%s\"\n", c.Token, c.Email)
-	// 0600 — only owner can read/write, token stays private
 	return os.WriteFile(path, []byte(content), 0600)
 }
 
-// runSetup walks the user through first-time setup.
 func runSetup() {
 	fmt.Println()
 	fmt.Println("  commitdog setup")
@@ -68,7 +63,6 @@ func runSetup() {
 
 	existing := loadConfig()
 
-	// --- email ---
 	currentEmail := getGitEmail()
 	if currentEmail != "" {
 		fmt.Printf("  git email is set to: %s\n", currentEmail)
@@ -99,7 +93,6 @@ func runSetup() {
 		break
 	}
 
-	// set globally in git
 	if err := setGitEmail(existing.Email); err != nil {
 		fmt.Printf("  warning: could not set git email: %s\n", err)
 	} else {
@@ -109,7 +102,6 @@ func runSetup() {
 tokenSetup:
 	fmt.Println()
 
-	// --- token ---
 	if existing.Token != "" {
 		fmt.Println("  github token already saved.")
 		fmt.Printf("  replace it? [y/N] › ")
@@ -149,7 +141,6 @@ save:
 	fmt.Println()
 }
 
-// checkFirstRun checks if email is set, prompts if not.
 func checkFirstRun() {
 	email := getGitEmail()
 	if email != "" {
@@ -191,7 +182,6 @@ func checkFirstRun() {
 	_ = saveConfig(c)
 }
 
-// sanitizeInput strips dangerous characters from user input.
 func sanitizeInput(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.ReplaceAll(s, "\x00", "")

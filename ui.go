@@ -9,8 +9,6 @@ import (
 
 var reader = bufio.NewReader(os.Stdin)
 
-// pickSuggestion shows suggestions and returns the chosen message.
-// Returns empty string if user aborts.
 func pickSuggestion(suggestions []string) string {
 	fmt.Println()
 	fmt.Println("  suggestions:")
@@ -40,14 +38,12 @@ func pickSuggestion(suggestions []string) string {
 			return editMessage(suggestions[0])
 		}
 
-		// check numeric pick
 		for i := range suggestions {
 			if input == fmt.Sprintf("%d", i+1) {
 				return suggestions[i]
 			}
 		}
 
-		// invalid input — re-prompt on same line
 		fmt.Printf("  enter ")
 		for i := range suggestions {
 			if i > 0 {
@@ -59,7 +55,6 @@ func pickSuggestion(suggestions []string) string {
 	}
 }
 
-// editMessage lets user modify a suggestion before committing.
 func editMessage(suggestion string) string {
 	fmt.Printf("\n  edit message (enter to keep, ctrl+c to abort):\n")
 	fmt.Printf("  > %s\n", suggestion)
@@ -70,7 +65,6 @@ func editMessage(suggestion string) string {
 		return suggestion
 	}
 
-	// sanitize user input
 	cleaned := sanitizeMessage(input)
 	if cleaned == "" {
 		fmt.Println("  empty message, using original.")
@@ -79,11 +73,9 @@ func editMessage(suggestion string) string {
 	return cleaned
 }
 
-// askPush asks whether to push after committing.
 func askPush() {
 	remotes := getRemotes()
 	if len(remotes) == 0 {
-		// no remotes configured, skip push prompt
 		return
 	}
 
@@ -92,7 +84,7 @@ func askPush() {
 		return
 	}
 
-	remote := remotes[0] // default to first remote (usually "origin")
+	remote := remotes[0]
 
 	fmt.Printf("\n  push to %s/%s? [Y/n] › ", remote, branch)
 
@@ -116,7 +108,6 @@ func askPush() {
 	}
 }
 
-// readLine reads a trimmed line from stdin.
 func readLine() string {
 	line, err := reader.ReadString('\n')
 	if err != nil {

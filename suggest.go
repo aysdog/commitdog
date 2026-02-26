@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// generateSuggestions returns 2-3 commit message suggestions.
 func generateSuggestions(a analysis) []string {
 	var suggestions []string
 
@@ -22,7 +21,6 @@ func generateSuggestions(a analysis) []string {
 		suggestions = append(suggestions, s3)
 	}
 
-	// always return at least 2
 	if len(suggestions) < 2 {
 		suggestions = append(suggestions, buildFallback(a))
 	}
@@ -30,7 +28,6 @@ func generateSuggestions(a analysis) []string {
 	return suggestions
 }
 
-// buildPrimary: type(scope): verb + subject — most descriptive
 func buildPrimary(a analysis) string {
 	t := a.commitType
 	scope := a.primaryScope
@@ -42,7 +39,6 @@ func buildPrimary(a analysis) string {
 	return fmt.Sprintf("%s: %s", t, desc)
 }
 
-// buildAlternate: type: description without scope, different verb
 func buildAlternate(a analysis) string {
 	t := a.commitType
 	desc := buildDescriptionAlt(a)
@@ -52,9 +48,7 @@ func buildAlternate(a analysis) string {
 	return fmt.Sprintf("%s: %s", t, desc)
 }
 
-// buildBrief: shortest useful message
 func buildBrief(a analysis) string {
-	// special cases first
 	if a.isDepUpdate {
 		return "chore: update dependencies"
 	}
@@ -74,7 +68,6 @@ func buildBrief(a analysis) string {
 		return "chore: remove debug logs"
 	}
 
-	// file-count based
 	if len(a.filesModified) == 1 {
 		name := cleanFileName(a.filesModified[0])
 		return fmt.Sprintf("%s: update %s", a.commitType, name)
@@ -95,9 +88,7 @@ func buildFallback(a analysis) string {
 	return fmt.Sprintf("%s: update source files", a.commitType)
 }
 
-// buildDescription constructs the main description clause.
 func buildDescription(a analysis) string {
-	// special cases
 	if a.isDepUpdate && len(a.addedFuncs) == 0 {
 		return "update project dependencies"
 	}
@@ -131,7 +122,6 @@ func buildDescription(a analysis) string {
 		return "remove debug logs"
 	}
 
-	// function-based descriptions
 	if len(a.addedFuncs) > 0 && len(a.removedFuncs) == 0 {
 		funcs := firstN(a.addedFuncs, 2)
 		return fmt.Sprintf("add %s", joinNames(funcs))
@@ -147,7 +137,6 @@ func buildDescription(a analysis) string {
 		)
 	}
 
-	// pattern-based
 	if contains(a.patterns, "error-handling") {
 		scope := a.primaryScope
 		if scope != "" {
@@ -165,7 +154,6 @@ func buildDescription(a analysis) string {
 		return "add inline documentation"
 	}
 
-	// file-based fallback
 	if len(a.filesAdded) > 0 {
 		if len(a.filesAdded) == 1 {
 			return fmt.Sprintf("add %s", cleanFileName(a.filesAdded[0]))
@@ -185,7 +173,6 @@ func buildDescription(a analysis) string {
 	return fmt.Sprintf("update %s", a.primaryScope)
 }
 
-// buildDescriptionAlt gives a different angle for the alternate suggestion.
 func buildDescriptionAlt(a analysis) string {
 	if a.isTestOnly {
 		return fmt.Sprintf("improve test coverage in %s", a.primaryScope)
@@ -212,19 +199,16 @@ func buildDescriptionAlt(a analysis) string {
 	return ""
 }
 
-// cleanFileName strips path and extension for readable output.
 func cleanFileName(path string) string {
 	base := filepath.Base(path)
 	ext := filepath.Ext(base)
 	name := strings.TrimSuffix(base, ext)
-	// strip test suffix
 	name = strings.TrimSuffix(name, "_test")
 	name = strings.TrimSuffix(name, ".test")
 	name = strings.TrimSuffix(name, ".spec")
 	return name
 }
 
-// joinNames joins function names naturally: "foo", "foo and bar", "foo, bar and baz"
 func joinNames(names []string) string {
 	switch len(names) {
 	case 0:

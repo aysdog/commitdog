@@ -7,8 +7,6 @@ import (
 	"strings"
 )
 
-// verifyGitRepo checks we're inside a real git repo.
-// Uses explicit args — no shell, no injection possible.
 func verifyGitRepo() error {
 	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
 	cmd.Stdout = nil
@@ -16,12 +14,7 @@ func verifyGitRepo() error {
 	return cmd.Run()
 }
 
-// getStagedDiff returns the staged diff as a string.
-// Hardcoded args — nothing user-supplied is ever passed to the shell.
 func getStagedDiff() (string, error) {
-	// --no-color ensures clean output
-	// -U3 gives 3 lines of context — enough for analysis
-	// --diff-filter=ACDMRT excludes untracked/unmerged noise
 	cmd := exec.Command(
 		"git", "diff", "--staged",
 		"--no-color",
@@ -39,7 +32,6 @@ func getStagedDiff() (string, error) {
 
 	raw := stdout.String()
 
-	// safety: cap diff size to 200KB — large diffs don't need full content
 	const maxBytes = 200 * 1024
 	if len(raw) > maxBytes {
 		raw = raw[:maxBytes]
@@ -48,7 +40,6 @@ func getStagedDiff() (string, error) {
 	return raw, nil
 }
 
-// getCurrentBranch returns the current branch name safely.
 func getCurrentBranch() string {
 	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
 	var out bytes.Buffer
@@ -59,7 +50,6 @@ func getCurrentBranch() string {
 	return strings.TrimSpace(out.String())
 }
 
-// getRemotes returns list of configured remotes.
 func getRemotes() []string {
 	cmd := exec.Command("git", "remote")
 	var out bytes.Buffer
@@ -78,11 +68,7 @@ func getRemotes() []string {
 	return remotes
 }
 
-// runCommit executes git commit with the given message.
-// Message is passed as a direct arg — never via shell interpolation.
 func runCommit(message string) error {
-	// sanitize: strip null bytes and shell metacharacters that could
-	// theoretically cause issues even with exec.Command (defense in depth)
 	message = sanitizeMessage(message)
 	if message == "" {
 		return fmt.Errorf("empty commit message")
@@ -99,9 +85,7 @@ func runCommit(message string) error {
 	return nil
 }
 
-// runPush executes git push for the current branch.
 func runPush(remote, branch string) error {
-	// validate remote and branch contain only safe chars
 	if !isSafeGitRef(remote) || !isSafeGitRef(branch) {
 		return fmt.Errorf("invalid remote or branch name")
 	}
@@ -117,20 +101,15 @@ func runPush(remote, branch string) error {
 	return nil
 }
 
-// sanitizeMessage removes characters that have no place in a commit message.
 func sanitizeMessage(s string) string {
-	// strip null bytes
 	s = strings.ReplaceAll(s, "\x00", "")
 
 	s = strings.TrimSpace(s)
-	// collapse internal newlines to space (commit -m takes first line)
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", "")
 	return s
 }
 
-// isSafeGitRef validates a git ref/remote name contains only safe characters.
-// Prevents any form of argument injection.
 func isSafeGitRef(s string) bool {
 	if s == "" || len(s) > 200 {
 		return false

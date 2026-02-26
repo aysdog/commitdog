@@ -1,11 +1,9 @@
-#!/bin/sh
 set -e
 
 REPO="aysdog/commitdog"
 BINARY="commitdog"
 INSTALL_DIR="/usr/local/bin"
 
-# colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -21,7 +19,6 @@ echo "  commitdog installer"
 echo "  ─────────────────────────────"
 echo ""
 
-# detect OS
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 
@@ -48,11 +45,9 @@ esac
 
 info "detected $OS/$ARCH → $ASSET"
 
-# get latest release URL
 info "fetching latest release..."
 DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$ASSET"
 
-# download
 TMP="$(mktemp)"
 info "downloading $ASSET..."
 
@@ -64,10 +59,8 @@ else
   error "curl or wget required. install one and try again."
 fi
 
-# make executable
 chmod +x "$TMP"
 
-# install
 info "installing to $INSTALL_DIR/$BINARY..."
 if [ -w "$INSTALL_DIR" ]; then
   mv "$TMP" "$INSTALL_DIR/$BINARY"

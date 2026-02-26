@@ -31,15 +31,12 @@ func main() {
 		}
 	}
 
-	// check email on every run — silent if already set
 	checkFirstRun()
 
-	// verify we're inside a git repo
 	if err := verifyGitRepo(); err != nil {
 		fatal("not a git repository. run 'commitdog init' to create one.")
 	}
 
-	// get staged diff
 	diff, err := getStagedDiff()
 	if err != nil {
 		fatal("failed to read staged diff: %v", err)
@@ -49,31 +46,26 @@ func main() {
 		fatal("nothing staged. run 'git add .' first.")
 	}
 
-	// analyze the diff
 	analysis := analyzeDiff(diff)
 
 	if analysis.filesChanged == 0 {
 		fatal("no changes detected in staged diff.")
 	}
 
-	// generate suggestions
 	suggestions := generateSuggestions(analysis)
 
-	// show picker
 	chosen := pickSuggestion(suggestions)
 	if chosen == "" {
 		fmt.Println("  aborted.")
 		os.Exit(0)
 	}
 
-	// commit
 	if err := runCommit(chosen); err != nil {
 		fatal("commit failed: %v", err)
 	}
 
 	fmt.Printf("\n  ✓ committed: %s\n", chosen)
 
-	// ask to push
 	askPush()
 }
 
