@@ -30,18 +30,19 @@ commitdog reads what you actually changed and writes the message for you. You pi
 
 ## install
 
+**Linux and macOS**
+
 ```sh
-curl -fsSL https://get.commitdog.dev | sh
+curl -fsSL https://aysdog.pages.dev/install-commitdog.sh | sh
 ```
 
-that's it. one command. works on Linux and macOS.
+**Windows** — open PowerShell as Administrator and run:
 
-<details>
-<summary>Windows</summary>
+```powershell
+irm https://aysdog.pages.dev/install-commitdog.ps1 | iex
+```
 
-Download `commitdog-windows-amd64.exe` from the [releases page](https://github.com/aysdog/commitdog/releases), rename it to `commitdog.exe` and add it to your PATH.
-
-</details>
+downloads the binary, adds it to PATH automatically. restart your terminal and `commitdog` just works.
 
 <details>
 <summary>build from source (needs Go 1.21+)</summary>
@@ -101,6 +102,36 @@ pick a number. press enter to push. that's the whole thing.
 
 ---
 
+## made a mistake? revert it
+
+```sh
+commitdog revert
+```
+
+```
+  recent commits:
+
+  1  63baabe  docs(dummy): update dummy       (2 minutes ago)
+  2  3b7486d  feat(auth): add refreshToken    (1 hour ago)
+  3  c90ace2  refactor: update 10 files       (6 hours ago)
+  4  57f7669  refactor(docs): update docs     (6 hours ago)
+  5  4403b0f  refactor: update 13 files       (6 hours ago)
+
+  [1-5] pick, [e] enter hash, [q] quit › 1
+
+  reverting 63baabe — docs(dummy): update dummy
+  ⚠  this creates a new revert commit. continue? [Y/n] ›
+
+  ✓ reverted 63baabe
+
+  push to origin/main? [Y/n] ›
+  ✓ pushed to origin/main
+```
+
+pick the bad commit. confirm. done. no git syntax needed.
+
+---
+
 ## starting a brand new project
 
 no more going to GitHub, creating a repo, copying the URL, setting the remote. commitdog does all of it:
@@ -143,6 +174,7 @@ commitdog init
 | command | what it does |
 |---------|-------------|
 | `commitdog` | suggest commit message for staged changes |
+| `commitdog revert` | pick from last 5 commits and revert |
 | `commitdog init` | create a GitHub repo and do the first push |
 | `commitdog setup` | configure email and GitHub token (do once) |
 | `commitdog --version` | print version |
