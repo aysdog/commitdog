@@ -30,7 +30,6 @@ type githubUser struct {
 	Login string `json:"login"`
 }
 
-// getGitHubUsername fetches the authenticated user's login.
 func getGitHubUsername(token string) (string, error) {
 	body, err := githubRequest("GET", "/user", token, nil)
 	if err != nil {
@@ -43,7 +42,6 @@ func getGitHubUsername(token string) (string, error) {
 	return u.Login, nil
 }
 
-// createPersonalRepo creates a repo under the authenticated user.
 func createPersonalRepo(token, name string, private bool) (repoResponse, error) {
 	payload := createRepoRequest{
 		Name:     name,
@@ -61,9 +59,7 @@ func createPersonalRepo(token, name string, private bool) (repoResponse, error) 
 	return r, nil
 }
 
-// createOrgRepo creates a repo under a GitHub org.
 func createOrgRepo(token, org, name string, private bool) (repoResponse, error) {
-	// validate org name
 	if !isSafeGitRef(org) {
 		return repoResponse{}, fmt.Errorf("invalid org name")
 	}
@@ -83,7 +79,6 @@ func createOrgRepo(token, org, name string, private bool) (repoResponse, error) 
 	return r, nil
 }
 
-// githubRequest makes an authenticated GitHub API request.
 func githubRequest(method, path string, token string, payload interface{}) ([]byte, error) {
 	var body io.Reader
 	if payload != nil {
@@ -98,8 +93,6 @@ func githubRequest(method, path string, token string, payload interface{}) ([]by
 	if err != nil {
 		return nil, err
 	}
-
-	// never log or expose the token
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
