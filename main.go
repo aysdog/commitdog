@@ -11,7 +11,13 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "--version", "-v":
-			fmt.Printf("commitdog v%s\n", version)
+			fmt.Println(`
+		/ ^ ^ \
+		/  o o  \
+		( =  Y  = )  commitdog v` + version + `
+		)       (   zero-bs commits
+		(_|___|_|_)  aysdog.pages.dev
+		`)
 			os.Exit(0)
 		case "--help", "-h":
 			printHelp()
