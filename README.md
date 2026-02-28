@@ -39,7 +39,7 @@ curl -fsSL https://aysdog.pages.dev/install-commitdog.sh | sh
 **Windows** — open PowerShell as Administrator and run:
 
 ```powershell
-irm https://aysdog.pages.dev/install-commitdog.ps1 | iex
+irm https://aysdog.com/install-commitdog.ps1 | iex
 ```
 
 downloads the binary, adds it to PATH automatically. restart your terminal and `commitdog` just works.
@@ -253,6 +253,6 @@ everything else is negotiable.
 
 ## part of aysdog
 
-commitdog is part of [aysdog](https://aysdog.pages.dev) — open-source tools for developers who hate bloat.
+commitdog is part of [aysdog](https://aysdog.com) — open-source tools for developers who hate bloat.
 
 zero telemetry · self-hostable · single binary · MIT licensed
