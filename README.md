@@ -33,7 +33,7 @@ commitdog reads what you actually changed and writes the message for you. You pi
 **Linux and macOS**
 
 ```sh
-curl -fsSL https://aysdog.pages.dev/install-commitdog.sh | sh
+curl -fsSL https://aysdog.com/install-commitdog.sh | sh
 ```
 
 **Windows** — open PowerShell as Administrator and run:
