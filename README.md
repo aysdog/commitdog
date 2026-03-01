@@ -255,4 +255,4 @@ everything else is negotiable.
 
 commitdog is part of [aysdog](https://aysdog.com) — open-source tools for developers who hate bloat.
 
-zero telemetry · self-hostable · single binary · MIT licensed
+zero telemetry · self-hostable · single binary · MIT licensed 
