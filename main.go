@@ -11,6 +11,8 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "--version", "-v":
+			printAsciiArt()
+			fmt.Println()
 			fmt.Println("commitdog v" + version)
 			fmt.Println("zero-bs commits · no AI · no telemetry")
 			fmt.Println("aysdog.pages.dev")
@@ -26,6 +28,9 @@ func main() {
 			os.Exit(0)
 		case "revert":
 			runRevert()
+			os.Exit(0)
+		case "--update", "update":
+			runUpdate()
 			os.Exit(0)
 		default:
 			fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
@@ -84,6 +89,7 @@ usage:
   commitdog init     create a new GitHub repo and do the first push
   commitdog setup    configure email and GitHub token
   commitdog revert   pick from last 5 commits and revert
+  commitdog --update update to latest version
   commitdog -v       show version
   commitdog -h       show this help
 

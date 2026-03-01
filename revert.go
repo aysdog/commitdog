@@ -34,47 +34,44 @@ func runRevert() {
 		fatal("no commits found in this repository.")
 	}
 
-	for {
-		chosen, ok := pickCommit(commits)
-		if !ok {
-			return
-		}
-
-		subject := subjectForHash(chosen, commits)
-		fmt.Println()
-		if subject != "" {
-			fmt.Printf("  reverting %s — %s\n", chosen[:7], subject)
-		} else {
-			fmt.Printf("  reverting %s\n", chosen[:7])
-		}
-
-		fmt.Printf("  ⚠  this creates a new revert commit. continue? [Y/n] › ")
-		confirm := readLine()
-		if confirm == "n" || confirm == "no" {
-			fmt.Println("  aborted.")
-			return
-		}
-
-		if err := gitRevert(chosen); err != nil {
-			if isConflictError(err) {
-				fmt.Println()
-				fmt.Println("  ✗ revert has conflicts — resolve them manually:")
-				fmt.Println()
-				fmt.Println("    1. fix the conflicting files")
-				fmt.Println("    2. git add .")
-				fmt.Println("    3. git revert --continue")
-				fmt.Println()
-				fmt.Println("  or to cancel: git revert --abort")
-				fmt.Println()
-				os.Exit(1)
-			}
-			fatal("revert failed: %v", err)
-		}
-
-		fmt.Printf("\n  ✓ reverted %s\n", chosen[:7])
-		askPush()
+	chosen, ok := pickCommit(commits)
+	if !ok {
 		return
 	}
+
+	subject := subjectForHash(chosen, commits)
+	fmt.Println()
+	if subject != "" {
+		fmt.Printf("  reverting %s — %s\n", chosen[:7], subject)
+	} else {
+		fmt.Printf("  reverting %s\n", chosen[:7])
+	}
+
+	fmt.Printf("  ⚠  this creates a new revert commit. continue? [Y/n] › ")
+	confirm := readLine()
+	if confirm == "n" || confirm == "no" {
+		fmt.Println("  aborted.")
+		return
+	}
+
+	if err := gitRevert(chosen); err != nil {
+		if isConflictError(err) {
+			fmt.Println()
+			fmt.Println("  ✗ revert has conflicts — resolve them manually:")
+			fmt.Println()
+			fmt.Println("    1. fix the conflicting files")
+			fmt.Println("    2. git add .")
+			fmt.Println("    3. git revert --continue")
+			fmt.Println()
+			fmt.Println("  or to cancel: git revert --abort")
+			fmt.Println()
+			os.Exit(1)
+		}
+		fatal("revert failed: %v", err)
+	}
+
+	fmt.Printf("\n  ✓ reverted %s\n", chosen[:7])
+	askPush()
 }
 
 func pickCommit(commits []commitEntry) (string, bool) {
