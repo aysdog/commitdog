@@ -15,7 +15,7 @@ func main() {
 			fmt.Println()
 			fmt.Println("commitdog v" + version)
 			fmt.Println("zero-bs commits · no AI · no telemetry")
-			fmt.Println("aysdog.pages.dev")
+			fmt.Println("aysdog.com")
 			os.Exit(0)
 		case "--help", "-h":
 			printHelp()
