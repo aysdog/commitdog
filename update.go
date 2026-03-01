@@ -75,13 +75,18 @@ func runUpdate() {
 		fatal("could not find current binary: %v", err)
 	}
 
-	if err := os.Chmod(tmpPath, 0755); err != nil {
-		fatal("could not set permissions: %v", err)
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(tmpPath, 0755); err != nil {
+			fatal("could not set permissions: %v", err)
+		}
 	}
 
 	fmt.Printf("  installing to %s...", selfPath)
 	if err := replaceBinary(tmpPath, selfPath); err != nil {
 		fmt.Println()
+		if runtime.GOOS == "windows" {
+			fatal("install failed: %v\n\n  run PowerShell as Administrator and try again", err)
+		}
 		fatal("install failed: %v\n\n  try: sudo commitdog --update", err)
 	}
 	fmt.Println(" done")
@@ -160,18 +165,45 @@ func downloadBinary(url string) (string, error) {
 }
 
 func replaceBinary(src, dst string) error {
-	err := os.Rename(src, dst)
-	if err == nil {
+	if runtime.GOOS == "windows" {
+		return replaceBinaryWindows(src, dst)
+	}
+	return replaceBinaryUnix(src, dst)
+}
+
+func replaceBinaryUnix(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
 		return nil
 	}
-
 	cmd := exec.Command("sudo", "mv", src, dst)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	if err2 := cmd.Run(); err2 != nil {
+	if err := cmd.Run(); err != nil {
 		os.Remove(src)
-		return fmt.Errorf("rename failed: %v, sudo mv failed: %v", err, err2)
+		return err
 	}
+	return nil
+}
+
+func replaceBinaryWindows(src, dst string) error {
+	old := dst + ".old"
+	os.Remove(old)
+
+	if err := os.Rename(dst, old); err != nil {
+		os.Remove(src)
+		return fmt.Errorf("could not move old binary: %v", err)
+	}
+
+	if err := os.Rename(src, dst); err != nil {
+		os.Rename(old, dst)
+		os.Remove(src)
+		return fmt.Errorf("could not place new binary: %v", err)
+	}
+
+	cmd := exec.Command("cmd", "/C", "ping", "-n", "2", "127.0.0.1", ">nul", "&", "del", "/F", "/Q", old)
+	cmd.SysProcAttr = nil
+	_ = cmd.Start()
+
 	return nil
 }

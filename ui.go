@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -93,7 +95,13 @@ func askPush() {
 		switch input {
 		case "y", "yes", "":
 			fmt.Printf("  pushing...")
-			if err := runPush(remote, branch); err != nil {
+			var err error
+			if !hasUpstream(branch) {
+				err = runPushUpstream(remote, branch)
+			} else {
+				err = runPush(remote, branch)
+			}
+			if err != nil {
 				fmt.Printf("\n  push failed: %s\n", err)
 			} else {
 				fmt.Printf("\n  ✓ pushed to %s/%s\n", remote, branch)
@@ -106,6 +114,14 @@ func askPush() {
 			fmt.Printf("  Y or n › ")
 		}
 	}
+}
+
+func hasUpstream(branch string) bool {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", branch+"@{upstream}")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = nil
+	return cmd.Run() == nil
 }
 
 func readLine() string {
