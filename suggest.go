@@ -49,6 +49,14 @@ func buildAlternate(a analysis) string {
 }
 
 func buildBrief(a analysis) string {
+	// deletion-only shortcuts
+	if a.isDeleteOnly {
+		if len(a.filesDeleted) == 1 {
+			return fmt.Sprintf("chore: delete %s", cleanFileName(a.filesDeleted[0]))
+		}
+		return fmt.Sprintf("chore: remove %d unused files", len(a.filesDeleted))
+	}
+
 	if a.isDepUpdate {
 		return "chore: update dependencies"
 	}
@@ -68,12 +76,19 @@ func buildBrief(a analysis) string {
 		return "chore: remove debug logs"
 	}
 
-	if len(a.filesModified) == 1 {
+	// single file modified — be specific
+	if len(a.filesModified) == 1 && len(a.filesAdded) == 0 && len(a.filesDeleted) == 0 {
 		name := cleanFileName(a.filesModified[0])
+		if len(a.addedFuncs) > 0 {
+			return fmt.Sprintf("%s: add %s to %s", a.commitType, joinNames(firstN(a.addedFuncs, 1)), name)
+		}
+		if len(a.removedFuncs) > 0 {
+			return fmt.Sprintf("%s: remove %s from %s", a.commitType, joinNames(firstN(a.removedFuncs, 1)), name)
+		}
 		return fmt.Sprintf("%s: update %s", a.commitType, name)
 	}
 
-	n := len(a.filesModified) + len(a.filesAdded)
+	n := len(a.filesModified) + len(a.filesAdded) + len(a.filesDeleted)
 	if n > 1 {
 		return fmt.Sprintf("%s: update %d files", a.commitType, n)
 	}
@@ -89,6 +104,21 @@ func buildFallback(a analysis) string {
 }
 
 func buildDescription(a analysis) string {
+	// deletion-only: precise single or multi
+	if a.isDeleteOnly {
+		if len(a.filesDeleted) == 1 {
+			return fmt.Sprintf("remove %s", cleanFileName(a.filesDeleted[0]))
+		}
+		names := make([]string, 0, len(a.filesDeleted))
+		for _, f := range a.filesDeleted {
+			names = append(names, cleanFileName(f))
+		}
+		if len(names) <= 3 {
+			return fmt.Sprintf("remove %s", joinNames(names))
+		}
+		return fmt.Sprintf("remove %d unused files", len(a.filesDeleted))
+	}
+
 	if a.isDepUpdate && len(a.addedFuncs) == 0 {
 		return "update project dependencies"
 	}
@@ -110,6 +140,9 @@ func buildDescription(a analysis) string {
 		if len(funcs) > 0 {
 			return fmt.Sprintf("add tests for %s", joinNames(funcs))
 		}
+		if len(a.filesModified) == 1 {
+			return fmt.Sprintf("add tests for %s", cleanFileName(a.filesModified[0]))
+		}
 		return "add test coverage"
 	}
 	if a.isConfigOnly {
@@ -122,19 +155,32 @@ func buildDescription(a analysis) string {
 		return "remove debug logs"
 	}
 
+	// functions added
 	if len(a.addedFuncs) > 0 && len(a.removedFuncs) == 0 {
-		funcs := firstN(a.addedFuncs, 2)
+		funcs := firstN(a.addedFuncs, 3)
+		if len(a.filesModified) == 1 {
+			name := cleanFileName(a.filesModified[0])
+			return fmt.Sprintf("add %s to %s", joinNames(funcs), name)
+		}
 		return fmt.Sprintf("add %s", joinNames(funcs))
 	}
+
+	// functions removed
 	if len(a.removedFuncs) > 0 && len(a.addedFuncs) == 0 {
-		funcs := firstN(a.removedFuncs, 2)
+		funcs := firstN(a.removedFuncs, 3)
+		if len(a.filesModified) == 1 {
+			name := cleanFileName(a.filesModified[0])
+			return fmt.Sprintf("remove %s from %s", joinNames(funcs), name)
+		}
 		return fmt.Sprintf("remove %s", joinNames(funcs))
 	}
+
+	// functions replaced
 	if len(a.addedFuncs) > 0 && len(a.removedFuncs) > 0 {
-		return fmt.Sprintf("replace %s with %s",
-			joinNames(firstN(a.removedFuncs, 1)),
-			joinNames(firstN(a.addedFuncs, 1)),
-		)
+		if len(a.addedFuncs) == 1 && len(a.removedFuncs) == 1 {
+			return fmt.Sprintf("replace %s with %s", a.removedFuncs[0], a.addedFuncs[0])
+		}
+		return fmt.Sprintf("refactor %s", a.primaryScope)
 	}
 
 	if contains(a.patterns, "error-handling") {
@@ -145,13 +191,27 @@ func buildDescription(a analysis) string {
 		return "improve error handling"
 	}
 	if contains(a.patterns, "tests") {
+		if a.primaryScope != "" {
+			return fmt.Sprintf("add tests for %s", a.primaryScope)
+		}
 		return "add test cases"
 	}
 	if contains(a.patterns, "logging") {
+		if a.primaryScope != "" {
+			return fmt.Sprintf("add logging to %s", a.primaryScope)
+		}
 		return "add logging"
 	}
 	if contains(a.patterns, "comments") {
 		return "add inline documentation"
+	}
+
+	// mixed: files added and modified together
+	if len(a.filesAdded) > 0 && len(a.filesModified) > 0 {
+		if len(a.filesAdded) == 1 {
+			return fmt.Sprintf("add %s and update %s", cleanFileName(a.filesAdded[0]), a.primaryScope)
+		}
+		return fmt.Sprintf("add %d files to %s", len(a.filesAdded), a.primaryScope)
 	}
 
 	if len(a.filesAdded) > 0 {
@@ -174,6 +234,12 @@ func buildDescription(a analysis) string {
 }
 
 func buildDescriptionAlt(a analysis) string {
+	if a.isDeleteOnly {
+		if len(a.filesDeleted) == 1 {
+			return fmt.Sprintf("clean up %s", cleanFileName(a.filesDeleted[0]))
+		}
+		return "clean up deleted files"
+	}
 	if a.isTestOnly {
 		return fmt.Sprintf("improve test coverage in %s", a.primaryScope)
 	}
@@ -183,13 +249,22 @@ func buildDescriptionAlt(a analysis) string {
 	if a.isMigration {
 		return fmt.Sprintf("migrate %s schema", a.primaryScope)
 	}
-	if len(a.addedFuncs) > 0 {
-		funcs := firstN(a.addedFuncs, 1)
+
+	// added funcs alt: implement phrasing
+	if len(a.addedFuncs) > 0 && len(a.removedFuncs) == 0 {
+		funcs := firstN(a.addedFuncs, 2)
 		if a.primaryScope != "" {
 			return fmt.Sprintf("implement %s in %s", joinNames(funcs), a.primaryScope)
 		}
 		return fmt.Sprintf("implement %s", joinNames(funcs))
 	}
+
+	// removed funcs alt: clean up phrasing
+	if len(a.removedFuncs) > 0 && len(a.addedFuncs) == 0 {
+		funcs := firstN(a.removedFuncs, 2)
+		return fmt.Sprintf("clean up %s", joinNames(funcs))
+	}
+
 	if contains(a.patterns, "error-handling") {
 		return fmt.Sprintf("add error handling for %s", a.primaryScope)
 	}

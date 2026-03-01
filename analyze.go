@@ -21,6 +21,7 @@ type analysis struct {
 	isDocsOnly    bool
 	isTestOnly    bool
 	isConfigOnly  bool
+	isDeleteOnly  bool
 }
 
 var (
@@ -77,26 +78,53 @@ func analyzeDiff(diff string) analysis {
 
 	lines := strings.Split(diff, "\n")
 	currentFile := ""
+	isDeleted := false
 
 	for _, line := range lines {
+		// detect deleted file header
+		if strings.HasPrefix(line, "deleted file mode") {
+			isDeleted = true
+			continue
+		}
+
+		// new diff block
+		if strings.HasPrefix(line, "diff --git ") {
+			isDeleted = false
+			currentFile = ""
+			continue
+		}
+
+		// track deleted file path from --- line
+		if strings.HasPrefix(line, "--- a/") && isDeleted {
+			path := strings.TrimPrefix(line, "--- a/")
+			path = strings.TrimSpace(path)
+			a.filesDeleted = appendUnique(a.filesDeleted, path)
+			currentFile = path
+			continue
+		}
+
 		if strings.HasPrefix(line, "+++ b/") {
 			currentFile = strings.TrimPrefix(line, "+++ b/")
 			currentFile = strings.TrimSpace(currentFile)
-			categorizeFile(&a, currentFile)
+			if !isDeleted {
+				categorizeFile(&a, currentFile)
+			}
 			continue
 		}
 
 		if strings.HasPrefix(line, "---") ||
-			strings.HasPrefix(line, "diff ") ||
 			strings.HasPrefix(line, "index ") ||
 			strings.HasPrefix(line, "@@") {
+			continue
+		}
+
+		if isDeleted {
 			continue
 		}
 
 		if funcs := extractFuncName(line, currentFile, true); funcs != "" {
 			a.addedFuncs = appendUnique(a.addedFuncs, funcs)
 		}
-
 		if funcs := extractFuncName(line, currentFile, false); funcs != "" {
 			a.removedFuncs = appendUnique(a.removedFuncs, funcs)
 		}
@@ -119,6 +147,12 @@ func analyzeDiff(diff string) analysis {
 	}
 
 	a.filesChanged = len(a.filesAdded) + len(a.filesDeleted) + len(a.filesModified)
+
+	// pure deletion — no additions, no modifications
+	if len(a.filesDeleted) > 0 && len(a.filesAdded) == 0 && len(a.filesModified) == 0 {
+		a.isDeleteOnly = true
+	}
+
 	a.primaryScope = inferScope(a)
 	a.commitType = inferType(a)
 
@@ -259,6 +293,9 @@ func inferScope(a analysis) string {
 }
 
 func inferType(a analysis) string {
+	if a.isDeleteOnly {
+		return "chore"
+	}
 	if a.isDepUpdate && len(a.filesModified) <= 2 {
 		return "chore"
 	}
