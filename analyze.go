@@ -22,6 +22,7 @@ type analysis struct {
 	isTestOnly    bool
 	isConfigOnly  bool
 	isDeleteOnly  bool
+	isNewFiles    bool
 }
 
 var (
@@ -79,22 +80,47 @@ func analyzeDiff(diff string) analysis {
 	lines := strings.Split(diff, "\n")
 	currentFile := ""
 	isDeleted := false
+	isNew := false
+	isRename := false
 
 	for _, line := range lines {
-		// detect deleted file header
 		if strings.HasPrefix(line, "deleted file mode") {
 			isDeleted = true
 			continue
 		}
 
-		// new diff block
-		if strings.HasPrefix(line, "diff --git ") {
-			isDeleted = false
-			currentFile = ""
+		if strings.HasPrefix(line, "new file mode") {
+			isNew = true
 			continue
 		}
 
-		// track deleted file path from --- line
+		if strings.HasPrefix(line, "diff --git ") {
+			if isNew && currentFile != "" {
+				a.filesAdded = appendUnique(a.filesAdded, currentFile)
+				a.isNewFiles = true
+			}
+			if isDeleted && currentFile != "" {
+				a.filesDeleted = appendUnique(a.filesDeleted, currentFile)
+			}
+			isDeleted = false
+			isNew = false
+			isRename = false
+			currentFile = parseDiffGitPath(line)
+			continue
+		}
+
+		if strings.HasPrefix(line, "rename to ") {
+			isRename = true
+			path := strings.TrimPrefix(line, "rename to ")
+			path = strings.TrimSpace(path)
+			a.filesModified = appendUnique(a.filesModified, path)
+			currentFile = path
+			continue
+		}
+		if strings.HasPrefix(line, "rename from ") {
+			continue
+		}
+
 		if strings.HasPrefix(line, "--- a/") && isDeleted {
 			path := strings.TrimPrefix(line, "--- a/")
 			path = strings.TrimSpace(path)
@@ -106,7 +132,13 @@ func analyzeDiff(diff string) analysis {
 		if strings.HasPrefix(line, "+++ b/") {
 			currentFile = strings.TrimPrefix(line, "+++ b/")
 			currentFile = strings.TrimSpace(currentFile)
-			if !isDeleted {
+			if isDeleted || isRename {
+				continue
+			}
+			if isNew {
+				a.filesAdded = appendUnique(a.filesAdded, currentFile)
+				a.isNewFiles = true
+			} else {
 				categorizeFile(&a, currentFile)
 			}
 			continue
@@ -118,7 +150,7 @@ func analyzeDiff(diff string) analysis {
 			continue
 		}
 
-		if isDeleted {
+		if isDeleted || isRename {
 			continue
 		}
 
@@ -146,9 +178,16 @@ func analyzeDiff(diff string) analysis {
 		}
 	}
 
+	if isNew && currentFile != "" {
+		a.filesAdded = appendUnique(a.filesAdded, currentFile)
+		a.isNewFiles = true
+	}
+	if isDeleted && currentFile != "" {
+		a.filesDeleted = appendUnique(a.filesDeleted, currentFile)
+	}
+
 	a.filesChanged = len(a.filesAdded) + len(a.filesDeleted) + len(a.filesModified)
 
-	// pure deletion — no additions, no modifications
 	if len(a.filesDeleted) > 0 && len(a.filesAdded) == 0 && len(a.filesModified) == 0 {
 		a.isDeleteOnly = true
 	}
@@ -271,7 +310,7 @@ func inferScope(a analysis) string {
 		base = strings.TrimSuffix(base, "_test")
 		base = strings.TrimSuffix(base, ".test")
 		base = strings.TrimSuffix(base, ".spec")
-		if base != "" && base != "main" && base != "index" {
+		if base != "" && base != "main" && base != "index" && base != ".gitkeep" {
 			scores[base]++
 		}
 	}
@@ -295,6 +334,9 @@ func inferScope(a analysis) string {
 func inferType(a analysis) string {
 	if a.isDeleteOnly {
 		return "chore"
+	}
+	if a.isNewFiles && len(a.filesModified) == 0 && len(a.filesDeleted) == 0 {
+		return "feat"
 	}
 	if a.isDepUpdate && len(a.filesModified) <= 2 {
 		return "chore"
@@ -362,6 +404,18 @@ func isConfigFile(path string) bool {
 		}
 	}
 	return false
+}
+
+func parseDiffGitPath(line string) string {
+	parts := strings.Fields(line)
+	if len(parts) < 4 {
+		return ""
+	}
+	b := parts[3]
+	if strings.HasPrefix(b, "b/") {
+		return b[2:]
+	}
+	return ""
 }
 
 func appendUnique(slice []string, s string) []string {

@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const version = "0.1.2"
+const version = "0.1.3"
 
 func main() {
 	if len(os.Args) > 1 {
@@ -49,13 +49,17 @@ func main() {
 		fatal("nothing staged. run 'git add .' first.")
 	}
 
-	analysis := analyzeDiff(diff)
+	a := analyzeDiff(diff)
 
-	if analysis.filesChanged == 0 {
+	if a.filesChanged == 0 && !a.isNewFiles {
 		fatal("no changes detected in staged diff.")
 	}
 
-	suggestions := generateSuggestions(analysis)
+	if a.filesChanged == 0 && a.isNewFiles {
+		a.filesChanged = len(a.filesAdded)
+	}
+
+	suggestions := generateSuggestions(a)
 
 	chosen := pickSuggestion(suggestions)
 	if chosen == "" {
