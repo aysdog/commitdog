@@ -10,7 +10,7 @@ reads your staged diff · suggests conventional commits · you pick one · done
 [![Go Version](https://img.shields.io/badge/go-1.21+-00ADD8.svg)](https://go.dev)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macOS%20%7C%20windows-lightgrey.svg)](#install)
 [![No Telemetry](https://img.shields.io/badge/telemetry-none-brightgreen.svg)](#security)
-[![part of aysdog](https://img.shields.io/badge/part%20of-aysdog-orange.svg)](https://aysdog.pages.dev)
+[![part of aysdog](https://img.shields.io/badge/part%20of-aysdog-orange.svg)](https://aysdog.com)
 
 [![Star History Chart](https://api.star-history.com/svg?repos=aysdog/commitdog&type=Date)](https://star-history.com/#aysdog/commitdog&Date)
 
@@ -102,6 +102,27 @@ pick a number. press enter to push. that's the whole thing.
 
 ---
 
+## branch, sync, stash
+
+```sh
+# switch branches fast
+commitdog branch
+
+# create a new branch
+commitdog branch create
+
+# fetch + rebase + push in one shot
+commitdog sync
+
+# save work in progress
+commitdog stash
+
+# update commitdog itself
+commitdog --update
+```
+
+---
+
 ## made a mistake? revert it
 
 ```sh
@@ -173,12 +194,19 @@ commitdog init
 
 | command | what it does |
 |---------|-------------|
-| `commitdog` | suggest commit message for staged changes |
+| `commitdog` | suggest commit message for staged changes, commit, ask to push |
 | `commitdog revert` | pick from last 5 commits and revert |
 | `commitdog init` | create a GitHub repo and do the first push |
 | `commitdog setup` | configure email and GitHub token (do once) |
-| `commitdog --version` | print version |
-| `commitdog --help` | print help |
+| `commitdog branch` | interactive branch switcher — 5 suggestions + type any name |
+| `commitdog branch create` | create new branch with optional base, push with upstream |
+| `commitdog branch ls` | list all local and remote branches |
+| `commitdog branch delete` | delete branch locally + optionally remote |
+| `commitdog sync` | fetch + pull rebase + push in one command |
+| `commitdog stash` | save, pop, or drop stashes interactively |
+| `commitdog --update` | update to latest release automatically |
+| `commitdog --version` | print version and ascii art |
+| `commitdog --help` | print full help |
 
 ---
 
@@ -233,7 +261,7 @@ commitdog is designed to never leak your data.
 | token in git ops | never used — SSH or HTTPS handles push, token only for API |
 | diff size | capped at 200KB — no memory issues |
 | commit messages | sanitized before passing to git |
-| network | zero outbound connections except `commitdog init` (GitHub API) |
+| network | zero outbound except `commitdog init` (GitHub API) and push/sync (your git remote) |
 | dependencies | pure Go stdlib — no third-party packages |
 
 you can read the entire source in 20 minutes. nothing is hidden.
@@ -255,4 +283,4 @@ everything else is negotiable.
 
 commitdog is part of [aysdog](https://aysdog.com) — open-source tools for developers who hate bloat.
 
-zero telemetry · self-hostable · single binary · MIT licensed 
+zero telemetry · self-hostable · single binary · MIT licensed
