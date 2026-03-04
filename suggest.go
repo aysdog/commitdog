@@ -171,6 +171,26 @@ func buildDescription(a analysis) string {
 		return "remove debug logs"
 	}
 
+	if len(a.renamedFuncs) > 0 && len(a.addedFuncs) == len(a.renamedFuncs) {
+		if len(a.renamedFuncs) == 1 {
+			return fmt.Sprintf("rename %s to %s", a.renamedFuncs[0][0], a.renamedFuncs[0][1])
+		}
+		return fmt.Sprintf("rename %d functions", len(a.renamedFuncs))
+	}
+
+	if len(a.addedVars) > 0 && len(a.removedVars) == 0 && len(a.addedFuncs) == 0 {
+		vars := firstN(a.addedVars, 2)
+		if len(a.filesModified) == 1 {
+			return fmt.Sprintf("add %s to %s", joinNames(vars), cleanFileName(a.filesModified[0]))
+		}
+		return fmt.Sprintf("add %s", joinNames(vars))
+	}
+
+	if len(a.removedVars) > 0 && len(a.addedVars) == 0 && len(a.addedFuncs) == 0 && len(a.removedFuncs) == 0 {
+		vars := firstN(a.removedVars, 2)
+		return fmt.Sprintf("remove %s", joinNames(vars))
+	}
+
 	if len(a.addedFuncs) > 0 && len(a.removedFuncs) == 0 {
 		funcs := firstN(a.addedFuncs, 3)
 		if len(a.filesModified) == 1 {
@@ -305,4 +325,87 @@ func joinNames(names []string) string {
 	default:
 		return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 	}
+}
+
+func generateBranchNameSuggestions(a analysis) []string {
+	var suggestions []string
+	seen := map[string]bool{}
+
+	add := func(s string) {
+		s = sanitizeBranchName(s)
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		suggestions = append(suggestions, s)
+	}
+
+	prefix := "feat"
+	if a.commitType != "" {
+		prefix = a.commitType
+	}
+
+	if len(a.addedFuncs) > 0 {
+		add(prefix + "/" + toKebab(a.addedFuncs[0]))
+	}
+	if len(a.renamedFuncs) > 0 {
+		add("refactor/" + toKebab(a.renamedFuncs[0][1]))
+	}
+	if len(a.filesAdded) > 0 {
+		name := cleanFileName(a.filesAdded[0])
+		add(prefix + "/" + toKebab(name))
+	}
+	if a.primaryScope != "" {
+		add(prefix + "/" + toKebab(a.primaryScope))
+	}
+	if len(a.filesModified) > 0 {
+		name := cleanFileName(a.filesModified[0])
+		add(prefix + "/" + toKebab(name))
+	}
+
+	for len(suggestions) < 3 {
+		add(prefix + "/update-" + toKebab(a.primaryScope))
+		if len(suggestions) < 3 {
+			break
+		}
+	}
+
+	if len(suggestions) > 3 {
+		suggestions = suggestions[:3]
+	}
+	return suggestions
+}
+
+func toKebab(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	prev := '-'
+	for _, c := range s {
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			b.WriteRune(c)
+			prev = c
+		} else if c == '-' || c == '_' || c == ' ' || c == '/' {
+			if prev != '-' {
+				b.WriteRune('-')
+				prev = '-'
+			}
+		}
+	}
+	result := strings.Trim(b.String(), "-")
+	if len(result) > 40 {
+		result = result[:40]
+	}
+	return result
+}
+
+func sanitizeBranchName(s string) string {
+	parts := strings.SplitN(s, "/", 2)
+	if len(parts) == 2 {
+		slug := toKebab(parts[1])
+		if slug == "" {
+			return ""
+		}
+		return parts[0] + "/" + slug
+	}
+	return toKebab(s)
 }

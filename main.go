@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const version = "0.1.4"
+const version = "0.1.6"
 
 func main() {
 	if len(os.Args) > 1 {
@@ -35,6 +35,15 @@ func main() {
 		case "branch":
 			runBranch()
 			os.Exit(0)
+		case "switch":
+			if err := verifyGitRepo(); err != nil {
+				fatal("not a git repository.")
+			}
+			runBranchSwitch()
+			os.Exit(0)
+		case "merge":
+			runMerge()
+			os.Exit(0)
 		case "sync":
 			runSync()
 			os.Exit(0)
@@ -42,9 +51,8 @@ func main() {
 			runStash()
 			os.Exit(0)
 		default:
-			fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
-			fmt.Fprintf(os.Stderr, "run 'commitdog --help' for usage.\n")
-			os.Exit(1)
+			runCommitFlow(os.Args[1:])
+			os.Exit(0)
 		}
 	}
 
@@ -54,21 +62,44 @@ func main() {
 		fatal("not a git repository. run 'commitdog init' to create one.")
 	}
 
+	runCommitFlow(nil)
+}
+
+func runCommitFlow(files []string) {
+	if err := verifyGitRepo(); err != nil {
+		fatal("not a git repository. run 'commitdog init' to create one.")
+	}
+
+	if len(files) > 0 {
+		if err := stageFiles(files); err != nil {
+			fatal("staging failed: %v", err)
+		}
+	} else {
+		diff, err := getStagedDiff()
+		if err != nil {
+			fatal("failed to read staged diff: %v", err)
+		}
+		if diff == "" {
+			fmt.Println("  nothing staged. staging all changes...")
+			if err := stageFiles([]string{"."}); err != nil {
+				fatal("staging failed: %v", err)
+			}
+		}
+	}
+
 	diff, err := getStagedDiff()
 	if err != nil {
 		fatal("failed to read staged diff: %v", err)
 	}
-
 	if diff == "" {
-		fatal("nothing staged. run 'git add .' first.")
+		fatal("nothing to commit — no changes found.")
 	}
 
-	a := analyzeDiff(diff)
+	a := analyzeDiffWithBranch(diff, getCurrentBranch())
 
 	if a.filesChanged == 0 && !a.isNewFiles {
 		fatal("no changes detected in staged diff.")
 	}
-
 	if a.filesChanged == 0 && a.isNewFiles {
 		a.filesChanged = len(a.filesAdded)
 	}
@@ -94,18 +125,21 @@ func printHelp() {
 	fmt.Println(`commitdog — zero-bs commit message generator
 
 usage:
-  commitdog                 generate commit message from staged diff
+  commitdog                 stage all changes and generate commit message
+  commitdog <file>          stage specific file and generate commit message
 
   commitdog init            create a new GitHub repo and first push
   commitdog setup           configure email and GitHub token
 
   commitdog revert          pick from last 5 commits and revert
 
-  commitdog branch          interactive branch switcher (shows 5 + edit)
-  commitdog branch switch   same as above
+  commitdog branch          1 switch  2 create new  3 delete
+  commitdog switch          go straight to branch switcher
   commitdog branch ls       list all local + remote branches
-  commitdog branch create   create a new branch with optional base
+  commitdog branch create   create branch (suggests names from staged diff)
   commitdog branch delete   delete local branch (+ optionally remote)
+
+  commitdog merge           merge a branch into current with preview
 
   commitdog sync            fetch + pull rebase + push in one command
 
@@ -124,16 +158,17 @@ workflow:
     commitdog init          ← creates repo on GitHub, first commit, push
 
   daily:
-    git add .
-    commitdog               ← suggests message, commits, asks to push
+    commitdog               ← stages everything, suggests message, commits
+    commitdog file.go       ← stage one file, suggest message, commit
     commitdog sync          ← fetch + rebase + push in one shot
-    commitdog branch        ← switch branches fast
+    commitdog branch        ← switch / create / delete
+    commitdog switch        ← straight to branch picker
     commitdog stash         ← save work in progress
 
   branching:
     commitdog branch ls     ← see all branches
-    commitdog branch create ← new branch, optional base, push
-    commitdog branch switch ← pick from 5 recent or type name
+    commitdog branch create ← new branch, suggests names from diff
+    commitdog switch        ← pick from 5 recent or type name
     commitdog branch delete ← safe delete with unmerged warning
 
   oops:

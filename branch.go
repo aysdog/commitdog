@@ -15,13 +15,11 @@ func runBranch() {
 
 	args := os.Args[2:]
 	if len(args) == 0 {
-		runBranchSwitch()
+		runBranchMenu()
 		return
 	}
 
 	switch args[0] {
-	case "switch", "sw":
-		runBranchSwitch()
 	case "create", "new":
 		runBranchCreate()
 	case "ls", "list":
@@ -30,8 +28,39 @@ func runBranch() {
 		runBranchDelete()
 	default:
 		fmt.Fprintf(os.Stderr, "  unknown branch command: %s\n", args[0])
-		fmt.Fprintf(os.Stderr, "  usage: commitdog branch [switch|create|ls|delete]\n")
+		fmt.Fprintf(os.Stderr, "  usage: commitdog branch [create|ls|delete]\n")
 		os.Exit(1)
+	}
+}
+
+func runBranchMenu() {
+	fmt.Println()
+	fmt.Println("  branch:")
+	fmt.Println()
+	fmt.Println("  1  switch")
+	fmt.Println("  2  create new")
+	fmt.Println("  3  delete")
+	fmt.Println()
+	fmt.Printf("  [1-3] pick, [q] quit › ")
+
+	for {
+		input := readLine()
+		switch input {
+		case "1":
+			runBranchSwitch()
+			return
+		case "2":
+			runBranchCreate()
+			return
+		case "3":
+			runBranchDelete()
+			return
+		case "q", "quit", "exit":
+			fmt.Println("  aborted.")
+			return
+		default:
+			fmt.Printf("  1, 2, 3, or q › ")
+		}
 	}
 }
 
@@ -147,23 +176,77 @@ func askBranchName(all []string, current string) string {
 
 func runBranchCreate() {
 	fmt.Println()
-	fmt.Printf("  new branch name › ")
 
-	name := ""
-	for {
-		input := strings.TrimSpace(readLine())
-		if input == "" {
-			fmt.Printf("  name cannot be empty › ")
-			continue
-		}
-		if !isSafeGitRef(input) {
-			fmt.Printf("  invalid branch name (use letters, numbers, - _ /) › ")
-			continue
-		}
-		name = input
-		break
+	var suggestions []string
+	diff, err := getStagedDiff()
+	if err == nil && diff != "" {
+		a := analyzeDiffWithBranch(diff, getCurrentBranch())
+		suggestions = generateBranchNameSuggestions(a)
 	}
 
+	if len(suggestions) > 0 {
+		fmt.Println("  suggested branch names:")
+		fmt.Println()
+		for i, s := range suggestions {
+			fmt.Printf("  %d  %s\n", i+1, s)
+		}
+		fmt.Println()
+		fmt.Printf("  [1-%d] pick, [e] enter name › ", len(suggestions))
+
+		input := readLine()
+		picked := false
+		name := ""
+		for i, s := range suggestions {
+			if input == fmt.Sprintf("%d", i+1) {
+				name = s
+				picked = true
+				break
+			}
+		}
+		if !picked {
+			fmt.Printf("  new branch name › ")
+			for {
+				var raw string
+				if input != "e" && input != "" {
+					raw = input
+					input = ""
+				} else {
+					raw = strings.TrimSpace(readLine())
+				}
+				if raw == "" {
+					fmt.Printf("  name cannot be empty › ")
+					continue
+				}
+				if !isSafeGitRef(raw) {
+					fmt.Printf("  invalid branch name (use letters, numbers, - _ /) › ")
+					continue
+				}
+				name = raw
+				break
+			}
+		}
+		doCreateBranch(name)
+	} else {
+		fmt.Printf("  new branch name › ")
+		name := ""
+		for {
+			input := strings.TrimSpace(readLine())
+			if input == "" {
+				fmt.Printf("  name cannot be empty › ")
+				continue
+			}
+			if !isSafeGitRef(input) {
+				fmt.Printf("  invalid branch name (use letters, numbers, - _ /) › ")
+				continue
+			}
+			name = input
+			break
+		}
+		doCreateBranch(name)
+	}
+}
+
+func doCreateBranch(name string) {
 	current := getCurrentBranch()
 	fmt.Printf("  base branch? [enter = %s] › ", current)
 	base := strings.TrimSpace(readLine())

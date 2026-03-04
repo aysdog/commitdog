@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -120,6 +121,19 @@ func isSafeGitRef(s string) bool {
 		}
 	}
 	return true
+}
+
+func stageFiles(paths []string) error {
+	for _, p := range paths {
+		cmd := exec.Command("git", "add", "--", p)
+		cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("could not stage %s: %s", p, strings.TrimSpace(stderr.String()))
+		}
+	}
+	return nil
 }
 
 func isAlphanumeric(c rune) bool {

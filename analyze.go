@@ -15,6 +15,11 @@ type analysis struct {
 	commitType    string
 	addedFuncs    []string
 	removedFuncs  []string
+	renamedFuncs  [][2]string
+	addedVars     []string
+	removedVars   []string
+	renamedFiles  [][2]string
+	branchHint    string
 	patterns      []string
 	isMigration   bool
 	isDepUpdate   bool
@@ -23,6 +28,7 @@ type analysis struct {
 	isConfigOnly  bool
 	isDeleteOnly  bool
 	isNewFiles    bool
+	isRenameOnly  bool
 }
 
 var (
@@ -67,6 +73,13 @@ var (
 	reRmFuncPy = regexp.MustCompile(`^-def\s+(\w+)\s*\(`)
 	reRmFuncRs = regexp.MustCompile(`^-(?:pub\s+)?fn\s+(\w+)\s*[<(]`)
 
+	reVarGoAdd = regexp.MustCompile(`^\+(?:var|const)\s+(\w{2,})\b`)
+	reVarGoRm  = regexp.MustCompile(`^-(?:var|const)\s+(\w{2,})\b`)
+	reVarJSAdd = regexp.MustCompile(`^\+(?:const|let|var)\s+(\w{2,})\s*[=;]`)
+	reVarJSRm  = regexp.MustCompile(`^-(?:const|let|var)\s+(\w{2,})\s*[=;]`)
+	reVarPyAdd = regexp.MustCompile(`^\+([A-Z][A-Z0-9_]{2,})\s*=`)
+	reVarPyRm  = regexp.MustCompile(`^-([A-Z][A-Z0-9_]{2,})\s*=`)
+
 	reErrorHandling = regexp.MustCompile(`^\+.*(?:err|error|Error|exception|Exception|catch|rescue)\b`)
 	reLogging       = regexp.MustCompile(`^\+.*(?:log\.|logger\.|console\.log|fmt\.Print|println!|logging\.)`)
 	reRmLogging     = regexp.MustCompile(`^-.*(?:console\.log|fmt\.Print|println!|log\.Debug)`)
@@ -75,13 +88,19 @@ var (
 )
 
 func analyzeDiff(diff string) analysis {
+	return analyzeDiffWithBranch(diff, "")
+}
+
+func analyzeDiffWithBranch(diff string, branch string) analysis {
 	a := analysis{}
+	a.branchHint = branch
 
 	lines := strings.Split(diff, "\n")
 	currentFile := ""
 	isDeleted := false
 	isNew := false
 	isRename := false
+	renameFrom := ""
 
 	for _, line := range lines {
 		if strings.HasPrefix(line, "deleted file mode") {
@@ -105,33 +124,36 @@ func analyzeDiff(diff string) analysis {
 			isDeleted = false
 			isNew = false
 			isRename = false
+			renameFrom = ""
 			currentFile = parseDiffGitPath(line)
+			continue
+		}
+
+		if strings.HasPrefix(line, "rename from ") {
+			renameFrom = strings.TrimSpace(strings.TrimPrefix(line, "rename from "))
 			continue
 		}
 
 		if strings.HasPrefix(line, "rename to ") {
 			isRename = true
-			path := strings.TrimPrefix(line, "rename to ")
-			path = strings.TrimSpace(path)
-			a.filesModified = appendUnique(a.filesModified, path)
-			currentFile = path
-			continue
-		}
-		if strings.HasPrefix(line, "rename from ") {
+			renameTo := strings.TrimSpace(strings.TrimPrefix(line, "rename to "))
+			a.filesModified = appendUnique(a.filesModified, renameTo)
+			if renameFrom != "" {
+				a.renamedFiles = append(a.renamedFiles, [2]string{renameFrom, renameTo})
+			}
+			currentFile = renameTo
 			continue
 		}
 
 		if strings.HasPrefix(line, "--- a/") && isDeleted {
-			path := strings.TrimPrefix(line, "--- a/")
-			path = strings.TrimSpace(path)
+			path := strings.TrimSpace(strings.TrimPrefix(line, "--- a/"))
 			a.filesDeleted = appendUnique(a.filesDeleted, path)
 			currentFile = path
 			continue
 		}
 
 		if strings.HasPrefix(line, "+++ b/") {
-			currentFile = strings.TrimPrefix(line, "+++ b/")
-			currentFile = strings.TrimSpace(currentFile)
+			currentFile = strings.TrimSpace(strings.TrimPrefix(line, "+++ b/"))
 			if isDeleted || isRename {
 				continue
 			}
@@ -161,6 +183,13 @@ func analyzeDiff(diff string) analysis {
 			a.removedFuncs = appendUnique(a.removedFuncs, funcs)
 		}
 
+		if v := extractVarName(line, currentFile, true); v != "" {
+			a.addedVars = appendUnique(a.addedVars, v)
+		}
+		if v := extractVarName(line, currentFile, false); v != "" {
+			a.removedVars = appendUnique(a.removedVars, v)
+		}
+
 		if reErrorHandling.MatchString(line) {
 			a.patterns = appendUnique(a.patterns, "error-handling")
 		}
@@ -186,10 +215,17 @@ func analyzeDiff(diff string) analysis {
 		a.filesDeleted = appendUnique(a.filesDeleted, currentFile)
 	}
 
+	detectRenamedFuncs(&a)
+
 	a.filesChanged = len(a.filesAdded) + len(a.filesDeleted) + len(a.filesModified)
 
 	if len(a.filesDeleted) > 0 && len(a.filesAdded) == 0 && len(a.filesModified) == 0 {
 		a.isDeleteOnly = true
+	}
+
+	if len(a.renamedFiles) > 0 && len(a.filesAdded) == 0 && len(a.filesDeleted) == 0 &&
+		len(a.addedFuncs) == 0 && len(a.removedFuncs) == 0 {
+		a.isRenameOnly = true
 	}
 
 	a.primaryScope = inferScope(a)
@@ -241,6 +277,74 @@ func categorizeFile(a *analysis, path string) {
 	a.isTestOnly = false
 	a.isDocsOnly = false
 	a.isConfigOnly = false
+}
+
+func extractVarName(line, file string, added bool) string {
+	ext := strings.ToLower(filepath.Ext(file))
+	var re *regexp.Regexp
+
+	if added {
+		switch ext {
+		case ".go":
+			re = reVarGoAdd
+		case ".js", ".ts", ".jsx", ".tsx":
+			re = reVarJSAdd
+		case ".py":
+			re = reVarPyAdd
+		}
+	} else {
+		switch ext {
+		case ".go":
+			re = reVarGoRm
+		case ".js", ".ts", ".jsx", ".tsx":
+			re = reVarJSRm
+		case ".py":
+			re = reVarPyRm
+		}
+	}
+
+	if re == nil {
+		return ""
+	}
+	if m := re.FindStringSubmatch(line); len(m) > 1 {
+		name := m[1]
+		if len(name) <= 1 {
+			return ""
+		}
+		return name
+	}
+	return ""
+}
+
+func detectRenamedFuncs(a *analysis) {
+	if len(a.addedFuncs) == 0 || len(a.removedFuncs) == 0 {
+		return
+	}
+	used := map[string]bool{}
+	for _, added := range a.addedFuncs {
+		for _, removed := range a.removedFuncs {
+			if used[removed] {
+				continue
+			}
+			if isSimilarName(removed, added) {
+				a.renamedFuncs = append(a.renamedFuncs, [2]string{removed, added})
+				used[removed] = true
+				break
+			}
+		}
+	}
+}
+
+func isSimilarName(a, b string) bool {
+	al := strings.ToLower(a)
+	bl := strings.ToLower(b)
+	if strings.Contains(al, bl) || strings.Contains(bl, al) {
+		return true
+	}
+	if len(al) > 3 && len(bl) > 3 && al[:3] == bl[:3] {
+		return true
+	}
+	return false
 }
 
 func extractFuncName(line, file string, added bool) string {
@@ -332,6 +436,28 @@ func inferScope(a analysis) string {
 }
 
 func inferType(a analysis) string {
+	if a.branchHint != "" {
+		hint := strings.ToLower(a.branchHint)
+		if strings.HasPrefix(hint, "fix/") || strings.HasPrefix(hint, "bugfix/") || strings.HasPrefix(hint, "hotfix/") {
+			return "fix"
+		}
+		if strings.HasPrefix(hint, "feat/") || strings.HasPrefix(hint, "feature/") {
+			return "feat"
+		}
+		if strings.HasPrefix(hint, "docs/") {
+			return "docs"
+		}
+		if strings.HasPrefix(hint, "refactor/") || strings.HasPrefix(hint, "chore/") {
+			return "refactor"
+		}
+		if strings.HasPrefix(hint, "test/") {
+			return "test"
+		}
+	}
+
+	if a.isRenameOnly {
+		return "refactor"
+	}
 	if a.isDeleteOnly {
 		return "chore"
 	}
@@ -355,6 +481,9 @@ func inferType(a analysis) string {
 	}
 	if contains(a.patterns, "remove-debug-logs") && len(a.filesModified) <= 3 {
 		return "chore"
+	}
+	if len(a.renamedFuncs) > 0 && len(a.addedFuncs) == len(a.renamedFuncs) {
+		return "refactor"
 	}
 	if len(a.addedFuncs) > 0 && len(a.removedFuncs) == 0 {
 		return "feat"
