@@ -4,7 +4,7 @@
 
 **stop writing commit messages. let commitdog do it.**
 
-reads your staged diff · suggests conventional commits · you pick one · done
+reads your diff · stages your files · suggests conventional commits · you pick one · done
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/go-1.21+-00ADD8.svg)](https://go.dev)
@@ -75,14 +75,16 @@ saved to `~/.config/commitdog/config.toml`. never asked again.
 ## daily use
 
 ```sh
-# stage your changes like normal
-git add .
-
-# run commitdog instead of git commit
+# just run commitdog — it stages everything and suggests a message
 commitdog
+
+# or stage a specific file only
+commitdog auth.go
 ```
 
 ```
+  nothing staged. staging all changes...
+
   suggestions:
 
   1  feat(auth): add refreshToken and verifyToken
@@ -102,14 +104,20 @@ pick a number. press enter to push. that's the whole thing.
 
 ---
 
-## branch, sync, stash
+## branch, sync, stash, merge
 
 ```sh
-# switch branches fast
+# branch menu — switch, create, delete
 commitdog branch
 
-# create a new branch
+# jump straight to branch switcher
+commitdog switch
+
+# create a new branch (suggests names from your staged diff)
 commitdog branch create
+
+# merge a branch into current with preview
+commitdog merge
 
 # fetch + rebase + push in one shot
 commitdog sync
@@ -194,16 +202,19 @@ commitdog init
 
 | command | what it does |
 |---------|-------------|
-| `commitdog` | suggest commit message for staged changes, commit, ask to push |
+| `commitdog` | stage all changes, suggest commit message, commit, ask to push |
+| `commitdog <file>` | stage specific file, suggest commit message, commit, ask to push |
+| `commitdog switch` | jump straight to branch switcher |
+| `commitdog branch` | branch menu — switch / create new / delete |
+| `commitdog branch create` | create new branch, suggests names from diff |
+| `commitdog branch ls` | list all local and remote branches |
+| `commitdog branch delete` | delete branch locally + optionally remote |
+| `commitdog merge` | merge a branch with preview, conflict detection, editor open |
+| `commitdog sync` | fetch + pull rebase + push in one command |
+| `commitdog stash` | save, pop, or drop stashes interactively |
 | `commitdog revert` | pick from last 5 commits and revert |
 | `commitdog init` | create a GitHub repo and do the first push |
 | `commitdog setup` | configure email and GitHub token (do once) |
-| `commitdog branch` | interactive branch switcher — 5 suggestions + type any name |
-| `commitdog branch create` | create new branch with optional base, push with upstream |
-| `commitdog branch ls` | list all local and remote branches |
-| `commitdog branch delete` | delete branch locally + optionally remote |
-| `commitdog sync` | fetch + pull rebase + push in one command |
-| `commitdog stash` | save, pop, or drop stashes interactively |
 | `commitdog --update` | update to latest release automatically |
 | `commitdog --version` | print version and ascii art |
 | `commitdog --help` | print full help |
@@ -218,11 +229,15 @@ commitdog parses `git diff --staged` and looks at:
 what files changed?
   → source, test, config, docs, migration?
 
-what functions were added or removed?
-  → add refreshToken, remove oldAuth?
+what functions were added, removed, or renamed?
+  → add refreshToken, rename oldAuth to newAuth?
 
-what patterns are in the diff?
-  → error handling, logging, test cases?
+what variables or constants changed?
+  → new config keys, removed constants?
+
+what's the branch name?
+  → fix/token-refresh → commit type is fix
+  → feat/new-auth → commit type is feat
 
 what's the main folder/module?
   → auth, api, db?
@@ -235,7 +250,9 @@ then generates 2-3 variations in [conventional commits](https://www.conventional
 | what changed | type |
 |-------------|------|
 | new function added | `feat` |
-| function removed | `refactor` |
+| function removed or renamed | `refactor` |
+| branch named `fix/*` or `bugfix/*` | `fix` |
+| branch named `feat/*` or `feature/*` | `feat` |
 | only tests changed | `test` |
 | only docs/README | `docs` |
 | error handling added | `fix` |
