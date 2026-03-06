@@ -1,5 +1,10 @@
 commitdog
 commitdog.exe
+commitdog-linux-amd64
+commitdog-linux-arm64
+commitdog-darwin-amd64
+commitdog-darwin-arm64
+commitdog-windows-amd64.exe
 
 dist/
 
