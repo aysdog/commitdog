@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const version = "0.1.6"
+const version = "0.1.7"
 
 func main() {
 	if len(os.Args) > 1 {
@@ -71,9 +71,15 @@ func runCommitFlow(files []string) {
 	}
 
 	if len(files) > 0 {
+		for _, f := range files {
+			if _, err := os.Stat(f); os.IsNotExist(err) {
+				fatal("file not found: %s", f)
+			}
+		}
 		if err := stageFiles(files); err != nil {
 			fatal("staging failed: %v", err)
 		}
+		stageUntrackedEmpty()
 	} else {
 		diff, err := getStagedDiff()
 		if err != nil {
@@ -85,17 +91,27 @@ func runCommitFlow(files []string) {
 				fatal("staging failed: %v", err)
 			}
 		}
+		stageUntrackedEmpty()
 	}
 
 	diff, err := getStagedDiff()
 	if err != nil {
 		fatal("failed to read staged diff: %v", err)
 	}
-	if diff == "" {
+
+	stagedNew := getStagedNewFiles()
+
+	if diff == "" && len(stagedNew) == 0 {
+		warnEmptyDirs()
 		fatal("nothing to commit — no changes found.")
 	}
 
 	a := analyzeDiffWithBranch(diff, getCurrentBranch())
+
+	for _, f := range stagedNew {
+		a.filesAdded = appendUnique(a.filesAdded, f)
+		a.isNewFiles = true
+	}
 
 	if a.filesChanged == 0 && !a.isNewFiles {
 		fatal("no changes detected in staged diff.")

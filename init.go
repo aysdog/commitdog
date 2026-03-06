@@ -123,14 +123,10 @@ func runInit() {
 		return
 	}
 
-	analysis := analyzeDiff(diff)
-	suggestions := generateSuggestions(analysis)
-
-	if len(suggestions) == 0 || suggestions[0] == "" {
-		suggestions = []string{
-			"feat: initial commit",
-			"chore: initial project setup",
-		}
+	suggestions := []string{
+		"feat: initial commit",
+		"chore: initial project setup",
+		"init: bootstrap " + repoName,
 	}
 
 	chosen := pickSuggestion(suggestions)

@@ -12,6 +12,7 @@ func generateSuggestions(a analysis) []string {
 	s1 := buildPrimary(a)
 	s2 := buildAlternate(a)
 	s3 := buildBrief(a)
+	s4 := buildSummary(a)
 
 	suggestions = append(suggestions, s1)
 	if s2 != "" && s2 != s1 {
@@ -23,6 +24,10 @@ func generateSuggestions(a analysis) []string {
 
 	if len(suggestions) < 2 {
 		suggestions = append(suggestions, buildFallback(a))
+	}
+
+	if s4 != "" && s4 != s1 && s4 != s2 && s4 != s3 {
+		suggestions = append(suggestions, s4)
 	}
 
 	return suggestions
@@ -106,6 +111,45 @@ func buildFallback(a analysis) string {
 		return fmt.Sprintf("%s: update %s", a.commitType, a.primaryScope)
 	}
 	return fmt.Sprintf("%s: update source files", a.commitType)
+}
+
+func buildSummary(a analysis) string {
+	var parts []string
+
+	for _, f := range a.filesAdded {
+		parts = append(parts, "add "+cleanFileName(f))
+	}
+
+	if len(a.filesModified) > 0 {
+		if len(a.addedFuncs) > 0 {
+			parts = append(parts, "add "+joinNames(a.addedFuncs))
+		} else if len(a.removedFuncs) > 0 {
+			parts = append(parts, "remove "+joinNames(a.removedFuncs))
+		} else {
+			for _, f := range a.filesModified {
+				parts = append(parts, "update "+cleanFileName(f))
+			}
+		}
+	}
+
+	for _, f := range a.filesDeleted {
+		parts = append(parts, "remove "+cleanFileName(f))
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	seen := map[string]bool{}
+	unique := parts[:0]
+	for _, p := range parts {
+		if !seen[p] {
+			seen[p] = true
+			unique = append(unique, p)
+		}
+	}
+
+	return fmt.Sprintf("%s: %s", a.commitType, strings.Join(unique, ", "))
 }
 
 func buildDescription(a analysis) string {

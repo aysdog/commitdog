@@ -141,3 +141,76 @@ func isAlphanumeric(c rune) bool {
 		(c >= 'A' && c <= 'Z') ||
 		(c >= '0' && c <= '9')
 }
+
+func stageUntrackedEmpty() {
+	cmd := exec.Command("git", "ls-files", "--others", "--exclude-standard")
+	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		f := strings.TrimSpace(line)
+		if f == "" {
+			continue
+		}
+		info, err := os.Stat(f)
+		if err != nil {
+			continue
+		}
+		if info.Size() == 0 {
+			intent := exec.Command("git", "add", "-N", "--", f)
+			intent.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
+			intent.Run()
+		}
+	}
+}
+
+func getStagedNewFiles() []string {
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+	var files []string
+	for _, line := range strings.Split(out.String(), "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		xy := line[:2]
+		path := strings.TrimSpace(line[3:])
+		if path == "" {
+			continue
+		}
+		if xy == "A " || xy == "AN" {
+			files = append(files, path)
+		}
+	}
+	return files
+}
+
+func warnEmptyDirs() {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if name == ".git" {
+			continue
+		}
+		sub, err := os.ReadDir(name)
+		if err != nil {
+			continue
+		}
+		if len(sub) == 0 {
+			fmt.Printf("\n  %s/ is an empty directory — git does not track these. Add a file inside first.\n", name)
+		}
+	}
+}
