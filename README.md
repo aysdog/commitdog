@@ -90,8 +90,9 @@ commitdog auth.go
   1  feat(auth): add refreshToken and verifyToken
   2  feat: implement refreshToken in auth
   3  feat: update auth module
+  4  feat(auth): add refreshToken, add verifyToken — update middleware
 
-  [1/2/3] pick, [e] edit, [q] quit › 1
+  [1/2/3/4] pick, [e] edit, [q] quit › 1
 
   ✓ committed: feat(auth): add refreshToken and verifyToken
 
@@ -101,6 +102,40 @@ commitdog auth.go
 ```
 
 pick a number. press enter to push. that's the whole thing.
+
+---
+
+## git log with branch graph
+
+```sh
+commitdog log
+```
+
+interactive git log with a colored branch graph. each branch gets its own color. branch lines open and close as they diverge and merge.
+
+```
+  main
+  │
+  ● e3e28ab (HEAD -> main, origin/main)  Revert "feat: add a, add b, add c"
+  │
+  ● 160bf5a  Merge branch 'bugtest'
+  ├─╮
+  │ ● 1d85daf (origin/bugtest, bugtest)  chore: add test.com
+  │ │
+  ● │ 831ee73  feat: add a, add b, add c
+  │ │
+  ● │ ba0e2e6  feat(emptyfile): add emptyfile to emptyfolder
+  │ │
+  ● │ 4b55999  init: bootstrap bugtest
+  │
+```
+
+```
+  j / ↓   scroll down
+  k / ↑   scroll up
+  a       show all commits (default: 20)
+  q       quit
+```
 
 ---
 
@@ -185,12 +220,13 @@ commitdog init
   ✓ repo created: github.com/aysdog/my-project
 
   suggestions:
-  1  feat: initial project setup
-  2  chore: initial commit
+  1  feat: initial commit
+  2  chore: initial project setup
+  3  init: bootstrap my-project
 
-  [1/2] pick › 1
+  [1/2/3] pick › 1
 
-  ✓ committed: feat: initial project setup
+  ✓ committed: feat: initial commit
   ✓ pushed
 
   live at github.com/aysdog/my-project
@@ -204,6 +240,7 @@ commitdog init
 |---------|-------------|
 | `commitdog` | stage all changes, suggest commit message, commit, ask to push |
 | `commitdog <file>` | stage specific file, suggest commit message, commit, ask to push |
+| `commitdog log` | interactive git log with colored branch graph |
 | `commitdog switch` | jump straight to branch switcher |
 | `commitdog branch` | branch menu — switch / create new / delete |
 | `commitdog branch create` | create new branch, suggests names from diff |
@@ -243,7 +280,7 @@ what's the main folder/module?
   → auth, api, db?
 ```
 
-then generates 2-3 variations in [conventional commits](https://www.conventionalcommits.org) format and lets you pick.
+then generates 4 suggestions in [conventional commits](https://www.conventionalcommits.org) format and lets you pick.
 
 ### commit types it detects
 
@@ -282,6 +319,21 @@ commitdog is designed to never leak your data.
 | dependencies | pure Go stdlib — no third-party packages |
 
 you can read the entire source in 20 minutes. nothing is hidden.
+
+---
+
+## version history
+
+| version | what shipped |
+|---------|-------------|
+| v0.1.8  | `commitdog log` — interactive git log with colored branch graph |
+| v0.1.7  | empty file tracking, empty dir warnings, better init suggestions, multi-file summary |
+| v0.1.6  | release workflow fixes |
+| v0.1.5  | ascii build tag fix, binary size optimization |
+| v0.1.4  | branch, sync, stash, self-update, ascii art |
+| v0.1.3  | revert command, Windows installer |
+| v0.1.2  | setup, init, GitHub API, config |
+| v0.1.0  | initial release |
 
 ---
 
