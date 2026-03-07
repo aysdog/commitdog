@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const version = "0.1.7"
+const version = "0.1.8"
 
 func main() {
 	if len(os.Args) > 1 {
@@ -49,6 +49,9 @@ func main() {
 			os.Exit(0)
 		case "stash":
 			runStash()
+			os.Exit(0)
+		case "log":
+			runLog()
 			os.Exit(0)
 		default:
 			runCommitFlow(os.Args[1:])

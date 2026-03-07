@@ -87,10 +87,6 @@ var (
 	reComment       = regexp.MustCompile(`^\+\s*(?://|#|/\*|\*)`)
 )
 
-func analyzeDiff(diff string) analysis {
-	return analyzeDiffWithBranch(diff, "")
-}
-
 func analyzeDiffWithBranch(diff string, branch string) analysis {
 	a := analysis{}
 	a.branchHint = branch
