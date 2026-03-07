@@ -121,12 +121,12 @@ interactive git log with a colored branch graph. each branch gets its own color.
   ● 160bf5a  Merge branch 'bugtest'
   ├─╮
   │ ● 1d85daf (origin/bugtest, bugtest)  chore: add test.com
-  │ │
-  ● │ 831ee73  feat: add a, add b, add c
-  │ │
-  ● │ ba0e2e6  feat(emptyfile): add emptyfile to emptyfolder
-  │ │
-  ● │ 4b55999  init: bootstrap bugtest
+  │
+  ● 831ee73  feat: add a, add b, add c
+  │
+  ● ba0e2e6  feat(emptyfile): add emptyfile to emptyfolder
+  │
+  ● 4b55999  init: bootstrap bugtest
   │
 ```
 
