@@ -56,8 +56,9 @@ func printAsciiArt() {
 	}
 
 	gap := "    "
+	margin := "  "
 	for i, line := range asciiLines {
-		art := yellow + line + reset
+		art := yellow + margin + line + reset
 		if i < len(info) {
 			fmt.Printf("%s%s%s\n", art, gap, info[i])
 		} else {
@@ -65,9 +66,8 @@ func printAsciiArt() {
 		}
 	}
 
-	// print any remaining info lines if info is longer than art
 	if len(info) > len(asciiLines) {
-		padding := strings.Repeat(" ", artWidth)
+		padding := strings.Repeat(" ", artWidth+len(margin))
 		for i := len(asciiLines); i < len(info); i++ {
 			fmt.Printf("%s%s%s\n", padding, gap, info[i])
 		}

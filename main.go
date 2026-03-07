@@ -12,10 +12,6 @@ func main() {
 		switch os.Args[1] {
 		case "--version", "-v":
 			printAsciiArt()
-			fmt.Println()
-			fmt.Println("commitdog v" + version)
-			fmt.Println("zero-bs commits · no AI · no telemetry")
-			fmt.Println("aysdog.com")
 			os.Exit(0)
 		case "--help", "-h":
 			printHelp()
