@@ -5,10 +5,7 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strings"
-	"syscall"
-	"unsafe"
 )
 
 var asciiLines = []string{
@@ -32,51 +29,47 @@ var asciiLines = []string{
 
 const artWidth = 30
 
-func terminalWidth() int {
-	type winsize struct {
-		Row    uint16
-		Col    uint16
-		Xpixel uint16
-		Ypixel uint16
-	}
-	ws := &winsize{}
-	ret, _, _ := syscall.Syscall(
-		syscall.SYS_IOCTL,
-		uintptr(int(os.Stdout.Fd())),
-		uintptr(syscall.TIOCGWINSZ),
-		uintptr(unsafe.Pointer(ws)),
-	)
-	if int(ret) == -1 || ws.Col == 0 {
-		return 80
-	}
-	return int(ws.Col)
-}
-
 func printAsciiArt() {
-	tw := terminalWidth() - 2
-	if tw < 20 {
-		tw = 20
-	}
-	targetWidth := tw
-	if targetWidth > artWidth {
-		targetWidth = artWidth
-	}
-	ratio := float64(artWidth) / float64(targetWidth)
 	yellow := "\033[33m"
+	cyan := "\033[36m"
+	bold := "\033[1m"
+	dim := "\033[90m"
 	reset := "\033[0m"
-	for _, line := range asciiLines {
-		padded := line
-		for len(padded) < artWidth {
-			padded += " "
+
+	info := []string{
+		bold + cyan + "commitdog" + reset + dim + " v" + version + reset,
+		dim + "─────────────────────────────────" + reset,
+		"zero-bs commits · no AI · no telemetry",
+		"",
+		cyan + "commitdog" + reset + "              stage · commit · push",
+		cyan + "commitdog init" + reset + "         create repo · first push",
+		cyan + "commitdog log" + reset + "          colored branch graph",
+		cyan + "commitdog branch" + reset + "       branch management",
+		cyan + "commitdog merge" + reset + "        merge with preview",
+		cyan + "commitdog sync" + reset + "         pull · rebase · push",
+		cyan + "commitdog stash" + reset + "        save work in progress",
+		cyan + "commitdog revert" + reset + "       undo a commit",
+		cyan + "commitdog setup" + reset + "        configure github token",
+		"",
+		dim + "aysdog.com" + reset,
+		"",
+	}
+
+	gap := "    "
+	for i, line := range asciiLines {
+		art := yellow + line + reset
+		if i < len(info) {
+			fmt.Printf("%s%s%s\n", art, gap, info[i])
+		} else {
+			fmt.Printf("%s\n", art)
 		}
-		var sb strings.Builder
-		for i := 0; i < targetWidth; i++ {
-			srcIdx := int(float64(i) * ratio)
-			if srcIdx >= len(padded) {
-				srcIdx = len(padded) - 1
-			}
-			sb.WriteByte(padded[srcIdx])
+	}
+
+	// print any remaining info lines if info is longer than art
+	if len(info) > len(asciiLines) {
+		padding := strings.Repeat(" ", artWidth)
+		for i := len(asciiLines); i < len(info); i++ {
+			fmt.Printf("%s%s%s\n", padding, gap, info[i])
 		}
-		fmt.Printf("%s%s%s\n", yellow, strings.TrimRight(sb.String(), " "), reset)
 	}
 }
