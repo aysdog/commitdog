@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -97,7 +98,68 @@ func runPush(remote, branch string) error {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s", stderr.String())
+		msg := strings.TrimSpace(stderr.String())
+		if isHTTPSAuthError(msg) {
+			return tryFixHTTPSRemote(remote, branch)
+		}
+		return fmt.Errorf("%s", msg)
+	}
+	return nil
+}
+
+func isHTTPSAuthError(msg string) bool {
+	return strings.Contains(msg, "Password authentication is not supported") ||
+		strings.Contains(msg, "Invalid username or password") ||
+		strings.Contains(msg, "Authentication failed") && strings.Contains(msg, "https://")
+}
+
+func tryFixHTTPSRemote(remote, branch string) error {
+	// get current remote URL
+	cmd := exec.Command("git", "remote", "get-url", remote)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("push failed: authentication error. switch your remote to SSH manually:\n  git remote set-url origin git@github.com:user/repo.git")
+	}
+	currentURL := strings.TrimSpace(out.String())
+
+	if !strings.HasPrefix(currentURL, "https://github.com/") {
+		return fmt.Errorf("push failed: authentication error")
+	}
+
+	// convert https://github.com/user/repo.git → git@github.com:user/repo.git
+	sshURL := strings.Replace(currentURL, "https://github.com/", "git@github.com:", 1)
+
+	fmt.Println()
+	fmt.Printf("  push failed: GitHub no longer supports HTTPS password auth.\n")
+	fmt.Printf("  switch remote to SSH? (%s) [Y/n] › ", sshURL)
+
+	confirm := readLine()
+	if confirm == "n" || confirm == "no" {
+		fmt.Println()
+		fmt.Println("  to fix manually:")
+		fmt.Printf("  git remote set-url %s %s\n", remote, sshURL)
+		fmt.Println()
+		return fmt.Errorf("push aborted")
+	}
+
+	// switch remote to SSH
+	setCmd := exec.Command("git", "remote", "set-url", remote, sshURL)
+	var stderr bytes.Buffer
+	setCmd.Stderr = &stderr
+	if err := setCmd.Run(); err != nil {
+		return fmt.Errorf("could not update remote: %s", strings.TrimSpace(stderr.String()))
+	}
+
+	fmt.Printf("  ✓ remote switched to SSH\n")
+	fmt.Printf("  retrying push...\n")
+
+	// retry push
+	pushCmd := exec.Command("git", "push", remote, branch)
+	var pushStderr bytes.Buffer
+	pushCmd.Stderr = &pushStderr
+	if err := pushCmd.Run(); err != nil {
+		return fmt.Errorf("%s", strings.TrimSpace(pushStderr.String()))
 	}
 	return nil
 }
@@ -150,20 +212,16 @@ func stageUntrackedEmpty() {
 	if err := cmd.Run(); err != nil {
 		return
 	}
-	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
-		f := strings.TrimSpace(line)
+	for _, f := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		f = strings.TrimSpace(f)
 		if f == "" {
 			continue
 		}
 		info, err := os.Stat(f)
-		if err != nil {
+		if err != nil || info.Size() != 0 {
 			continue
 		}
-		if info.Size() == 0 {
-			intent := exec.Command("git", "add", "-N", "--", f)
-			intent.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
-			intent.Run()
-		}
+		exec.Command("git", "add", "-N", "--", f).Run()
 	}
 }
 
@@ -177,40 +235,35 @@ func getStagedNewFiles() []string {
 	}
 	var files []string
 	for _, line := range strings.Split(out.String(), "\n") {
-		if len(line) < 4 {
-			continue
-		}
-		xy := line[:2]
-		path := strings.TrimSpace(line[3:])
-		if path == "" {
-			continue
-		}
-		if xy == "A " || xy == "AN" {
-			files = append(files, path)
+		if strings.HasPrefix(line, "A ") || strings.HasPrefix(line, "AN") {
+			f := strings.TrimSpace(line[2:])
+			if f != "" {
+				files = append(files, f)
+			}
 		}
 	}
 	return files
 }
 
 func warnEmptyDirs() {
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+	err := filepath.WalkDir(".", func(path string, d os.DirEntry, err error) error {
+		if err != nil || path == "." {
+			return err
 		}
-		name := e.Name()
-		if name == ".git" {
-			continue
+		if !d.IsDir() {
+			return nil
 		}
-		sub, err := os.ReadDir(name)
+		if strings.HasPrefix(path, ".git") {
+			return filepath.SkipDir
+		}
+		entries, err := os.ReadDir(path)
 		if err != nil {
-			continue
+			return nil
 		}
-		if len(sub) == 0 {
-			fmt.Printf("\n  %s/ is an empty directory — git does not track these. Add a file inside first.\n", name)
+		if len(entries) == 0 {
+			fmt.Printf("  %s/ is an empty directory — git does not track these. Add a file inside first.\n", path)
 		}
-	}
+		return nil
+	})
+	_ = err
 }

@@ -54,7 +54,45 @@ func runRevert() {
 		return
 	}
 
-	if err := gitRevert(chosen); err != nil {
+	if isMergeCommit(chosen) {
+		parent1, parent2 := getMergeParentBranches(chosen)
+		fmt.Println()
+		fmt.Println("  ⚠  this is a merge commit. which side do you want to revert to?")
+		fmt.Println()
+		fmt.Printf("  1  %s  (before the merge — undo it entirely)\n", parent1)
+		fmt.Printf("  2  %s  (the branch that was merged in)\n", parent2)
+		fmt.Println()
+		fmt.Printf("  [1/2] pick › ")
+
+		mainline := 1
+		for {
+			input := strings.TrimSpace(readLine())
+			if input == "1" || input == "" {
+				mainline = 1
+				break
+			} else if input == "2" {
+				mainline = 2
+				break
+			}
+			fmt.Printf("  1 or 2 › ")
+		}
+
+		if err := gitRevertMerge(chosen, mainline); err != nil {
+			if isConflictError(err) {
+				fmt.Println()
+				fmt.Println("  ✗ revert has conflicts — resolve them manually:")
+				fmt.Println()
+				fmt.Println("    1. fix the conflicting files")
+				fmt.Println("    2. git add .")
+				fmt.Println("    3. git revert --continue")
+				fmt.Println()
+				fmt.Println("  or to cancel: git revert --abort")
+				fmt.Println()
+				os.Exit(1)
+			}
+			fatal("revert failed: %v", err)
+		}
+	} else if err := gitRevert(chosen); err != nil {
 		if isConflictError(err) {
 			fmt.Println()
 			fmt.Println("  ✗ revert has conflicts — resolve them manually:")
@@ -284,8 +322,71 @@ func askForHash() (string, bool) {
 	}
 }
 
+func isMergeCommit(hash string) bool {
+	cmd := exec.Command("git", "rev-parse", hash+"^2")
+	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
+	return cmd.Run() == nil
+}
+
+func getMergeParentBranches(hash string) (parent1, parent2 string) {
+	// get short hashes of both parents
+	cmd1 := exec.Command("git", "rev-parse", "--short", hash+"^1")
+	cmd1.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
+	var out1 bytes.Buffer
+	cmd1.Stdout = &out1
+	cmd1.Run()
+	p1 := strings.TrimSpace(out1.String())
+
+	cmd2 := exec.Command("git", "rev-parse", "--short", hash+"^2")
+	cmd2.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
+	var out2 bytes.Buffer
+	cmd2.Stdout = &out2
+	cmd2.Run()
+	p2 := strings.TrimSpace(out2.String())
+
+	// try to resolve parent hashes to branch names
+	parent1 = resolveBranchName(p1)
+	parent2 = resolveBranchName(p2)
+	return
+}
+
+func resolveBranchName(hash string) string {
+	// try to find a branch pointing to this commit
+	cmd := exec.Command("git", "branch", "--all", "--format=%(refname:short)", "--points-at", hash)
+	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil || strings.TrimSpace(out.String()) == "" {
+		return hash
+	}
+	// return first branch name found, prefer local over remote
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" && !strings.HasPrefix(l, "origin/HEAD") {
+			return l
+		}
+	}
+	return hash
+}
+
 func gitRevert(hash string) error {
 	cmd := exec.Command("git", "revert", hash, "--no-edit")
+	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			return fmt.Errorf("git revert failed")
+		}
+		return fmt.Errorf("%s", msg)
+	}
+	return nil
+}
+
+func gitRevertMerge(hash string, mainline int) error {
+	cmd := exec.Command("git", "revert", "-m", fmt.Sprintf("%d", mainline), hash, "--no-edit")
 	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
