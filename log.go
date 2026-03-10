@@ -137,7 +137,6 @@ func buildGraph(commits []logCommit) []string {
 
 		newLanes := updateLanes(lanes, col, commit, &colorCounter)
 
-		// Branch opening: merge commit added a new lane to the right
 		if len(newLanes) > len(oldLanes) {
 			for d := len(oldLanes); d < len(newLanes); d++ {
 				newLane := newLanes[d]
@@ -149,10 +148,11 @@ func buildGraph(commits []logCommit) []string {
 						sb.WriteString(laneColor(newLane) + "─" + resetColor)
 					} else if i == d {
 						sb.WriteString(laneColor(newLane) + "╮" + resetColor)
-						sb.WriteString(" ")
+						if i < len(newLanes)-1 {
+							sb.WriteString(" ")
+						}
 					} else if i > col && i < d {
-						sb.WriteString(laneColor(newLane) + "─" + resetColor)
-						sb.WriteString(laneColor(newLane) + "─" + resetColor)
+						sb.WriteString(laneColor(newLane) + "──" + resetColor)
 					} else {
 						sb.WriteString(laneColor(l) + "│" + resetColor)
 						sb.WriteString(" ")
@@ -160,9 +160,14 @@ func buildGraph(commits []logCommit) []string {
 				}
 				output = append(output, sb.String())
 			}
-			output = append(output, buildConnector(newLanes))
+			nextCommitCol := -1
+			if ci+1 < len(commits) {
+				nextCommitCol = findLane(newLanes, commits[ci+1].hash)
+			}
+			if nextCommitCol < len(oldLanes) {
+				output = append(output, buildConnector(newLanes))
+			}
 
-			// Branch closing: a lane disappeared (its last commit was just processed)
 		} else if len(newLanes) < len(oldLanes) {
 			output = append(output, buildConnector(newLanes))
 
@@ -196,21 +201,17 @@ func updateLanes(lanes []lane, col int, commit logCommit, colorCounter *int) []l
 
 	firstParent := commit.parents[0]
 
-	// Check if first parent already exists in another lane — branch rejoins
 	existingCol := findLane(result, firstParent)
 	if existingCol != -1 && existingCol != col {
-		// This lane is merging back into an existing lane — remove this lane
 		result = append(result[:col], result[col+1:]...)
 		return result
 	}
 
 	result[col] = lane{hash: firstParent, colorIdx: lanes[col].colorIdx}
 
-	// Handle merge commit second+ parents (branch opening)
 	for _, p := range commit.parents[1:] {
 		existing := findLane(result, p)
 		if existing != -1 {
-			// already tracked — remove it (it's being merged in)
 			result = append(result[:existing], result[existing+1:]...)
 		} else {
 			result = append(result, lane{hash: p, colorIdx: *colorCounter % len(laneColors)})

@@ -1,0 +1,375 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type releaseProject struct {
+	lang    string
+	file    string
+	pattern *regexp.Regexp
+	replace func(content, newVer string) string
+}
+
+var releaseProjects = []releaseProject{
+	{
+		lang:    "Go",
+		file:    "main.go",
+		pattern: regexp.MustCompile(`const version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"`),
+		replace: func(content, newVer string) string {
+			re := regexp.MustCompile(`(const version\s*=\s*)"[0-9]+\.[0-9]+\.[0-9]+"`)
+			return re.ReplaceAllString(content, `${1}"`+newVer+`"`)
+		},
+	},
+	{
+		lang:    "Node.js",
+		file:    "package.json",
+		pattern: regexp.MustCompile(`"version"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+)"`),
+		replace: func(content, newVer string) string {
+			re := regexp.MustCompile(`("version"\s*:\s*)"[0-9]+\.[0-9]+\.[0-9]+"`)
+			return re.ReplaceAllString(content, `${1}"`+newVer+`"`)
+		},
+	},
+	{
+		lang:    "Rust",
+		file:    "Cargo.toml",
+		pattern: regexp.MustCompile(`(?m)^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"`),
+		replace: func(content, newVer string) string {
+			re := regexp.MustCompile(`(?m)^(version\s*=\s*)"[0-9]+\.[0-9]+\.[0-9]+"`)
+			return re.ReplaceAllString(content, `${1}"`+newVer+`"`)
+		},
+	},
+	{
+		lang:    "Python",
+		file:    "pyproject.toml",
+		pattern: regexp.MustCompile(`version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"`),
+		replace: func(content, newVer string) string {
+			re := regexp.MustCompile(`(version\s*=\s*)"[0-9]+\.[0-9]+\.[0-9]+"`)
+			return re.ReplaceAllString(content, `${1}"`+newVer+`"`)
+		},
+	},
+	{
+		lang:    "Python",
+		file:    "setup.py",
+		pattern: regexp.MustCompile(`version\s*=\s*['"]([0-9]+\.[0-9]+\.[0-9]+)['""]`),
+		replace: func(content, newVer string) string {
+			re := regexp.MustCompile(`(version\s*=\s*)['"][0-9]+\.[0-9]+\.[0-9]+['"]`)
+			return re.ReplaceAllString(content, `${1}"`+newVer+`"`)
+		},
+	},
+	{
+		lang:    "Java",
+		file:    "pom.xml",
+		pattern: regexp.MustCompile(`<version>([0-9]+\.[0-9]+\.[0-9]+)</version>`),
+		replace: func(content, newVer string) string {
+			re := regexp.MustCompile(`<version>[0-9]+\.[0-9]+\.[0-9]+</version>`)
+			return re.ReplaceAllString(content, "<version>"+newVer+"</version>")
+		},
+	},
+}
+
+func runRelease() {
+	if err := verifyGitRepo(); err != nil {
+		fatal("not a git repository.")
+	}
+
+	cfg := loadConfig()
+	if cfg.Token == "" {
+		fatal("no GitHub token found. run 'commitdog setup' first.")
+	}
+
+	owner, repo := getRepoOwnerAndName()
+	if owner == "" || repo == "" {
+		fatal("could not detect GitHub repo.")
+	}
+
+	proj, fileVer := detectProject()
+	if proj == nil {
+		fatal("could not detect project type. supported: Go, Node.js, Rust, Python, Java.")
+	}
+
+	currentVer := getLatestGitTag()
+	if currentVer == "" {
+		currentVer = fileVer
+	}
+
+	fmt.Println()
+	fmt.Printf("  detected: \033[36m%s\033[0m  ·  current version: \033[1mv%s\033[0m\n\n", proj.lang, currentVer)
+
+	major, minor, patch := splitVer(currentVer)
+	fmt.Printf("  1  patch  →  v%d.%d.%d\n", major, minor, patch+1)
+	fmt.Printf("  2  minor  →  v%d.%d.%d\n", major, minor+1, 0)
+	fmt.Printf("  3  major  →  v%d.%d.%d\n", major+1, 0, 0)
+	fmt.Printf("  4  custom\n\n")
+	fmt.Printf("  [1/2/3/4/q] pick › ")
+
+	var nextVer string
+	for {
+		input := strings.TrimSpace(readLine())
+		switch input {
+		case "1":
+			nextVer = fmt.Sprintf("%d.%d.%d", major, minor, patch+1)
+		case "2":
+			nextVer = fmt.Sprintf("%d.%d.%d", major, minor+1, 0)
+		case "3":
+			nextVer = fmt.Sprintf("%d.%d.%d", major+1, 0, 0)
+		case "4":
+			fmt.Printf("  version › ")
+			custom := strings.TrimSpace(readLine())
+			custom = strings.TrimPrefix(custom, "v")
+			if !isValidSemver(custom) {
+				fmt.Printf("  invalid semver (e.g. 1.2.3) › ")
+				continue
+			}
+			nextVer = custom
+		case "q":
+			fmt.Println("  aborted.")
+			return
+		default:
+			fmt.Printf("  1, 2, 3, or 4 › ")
+			continue
+		}
+		break
+	}
+
+	fmt.Println()
+
+	printStep("bumping version in "+proj.file+"...", func() error {
+		return bumpVersion(proj, nextVer)
+	})
+
+	isGo := proj.lang == "Go"
+	var binaries []string
+
+	if isGo {
+		targets := []struct{ goos, goarch, suffix string }{
+			{"linux", "amd64", ""},
+			{"linux", "arm64", ""},
+			{"darwin", "amd64", ""},
+			{"darwin", "arm64", ""},
+			{"windows", "amd64", ".exe"},
+		}
+		for _, t := range targets {
+			name := fmt.Sprintf("%s-%s-%s%s", repo, t.goos, t.goarch, t.suffix)
+			label := fmt.Sprintf("building %s/%s...", t.goos, t.goarch)
+			goos := t.goos
+			goarch := t.goarch
+			n := name
+			printStep(label, func() error {
+				cmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", n, ".")
+				cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch)
+				var stderr bytes.Buffer
+				cmd.Stderr = &stderr
+				if err := cmd.Run(); err != nil {
+					return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
+				}
+				return nil
+			})
+			binaries = append(binaries, name)
+		}
+	}
+
+	printStep("committing...", func() error {
+		exec.Command("git", "add", ".").Run()
+		cmd := exec.Command("git", "commit", "-m", "chore: release v"+nextVer)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
+		}
+		return nil
+	})
+
+	printStep("tagging v"+nextVer+"...", func() error {
+		cmd := exec.Command("git", "tag", "v"+nextVer)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
+		}
+		return nil
+	})
+
+	printStep("pushing...", func() error {
+		cmd := exec.Command("git", "push", "origin", "main", "--tags")
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
+		}
+		return nil
+	})
+
+	var releaseID int64
+	printStep("creating GitHub release...", func() error {
+		id, err := createGitHubRelease(cfg.Token, owner, repo, nextVer)
+		if err != nil {
+			return err
+		}
+		releaseID = id
+		return nil
+	})
+
+	if isGo && releaseID != 0 {
+		for _, bin := range binaries {
+			b := bin
+			printStep("uploading "+b+"...", func() error {
+				return uploadReleaseAsset(cfg.Token, releaseID, b)
+			})
+		}
+		for _, bin := range binaries {
+			os.Remove(bin)
+		}
+	}
+
+	fmt.Println()
+	fmt.Printf("  \033[32m✓ v%s released\033[0m\n", nextVer)
+	fmt.Printf("  https://github.com/%s/%s/releases/tag/v%s\n\n", owner, repo, nextVer)
+}
+
+func printStep(label string, fn func() error) {
+	fmt.Printf("  %-38s", label)
+	if err := fn(); err != nil {
+		fmt.Printf("\033[31m✗\033[0m\n")
+		fatal("%s", err)
+	}
+	fmt.Printf("\033[32m✓\033[0m\n")
+}
+
+func getLatestGitTag() string {
+	cmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
+	cmd.Env = append(os.Environ(), "GIT_PAGER=cat")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	return strings.TrimPrefix(strings.TrimSpace(out.String()), "v")
+}
+
+func detectProject() (*releaseProject, string) {
+	for i := range releaseProjects {
+		p := &releaseProjects[i]
+		data, err := os.ReadFile(p.file)
+		if err != nil {
+			continue
+		}
+		match := p.pattern.FindSubmatch(data)
+		if match != nil {
+			return p, string(match[1])
+		}
+	}
+	return nil, ""
+}
+
+func bumpVersion(proj *releaseProject, newVer string) error {
+	data, err := os.ReadFile(proj.file)
+	if err != nil {
+		return err
+	}
+	updated := proj.replace(string(data), newVer)
+	return os.WriteFile(proj.file, []byte(updated), 0644)
+}
+
+func splitVer(ver string) (int, int, int) {
+	ver = strings.TrimPrefix(ver, "v")
+	parts := strings.SplitN(ver, ".", 3)
+	if len(parts) != 3 {
+		return 0, 0, 0
+	}
+	major, _ := strconv.Atoi(parts[0])
+	minor, _ := strconv.Atoi(parts[1])
+	patch, _ := strconv.Atoi(parts[2])
+	return major, minor, patch
+}
+
+func isValidSemver(s string) bool {
+	parts := strings.SplitN(s, ".", 3)
+	if len(parts) != 3 {
+		return false
+	}
+	for _, p := range parts {
+		if _, err := strconv.Atoi(p); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func createGitHubRelease(token, owner, repo, ver string) (int64, error) {
+	payload := map[string]interface{}{
+		"tag_name": "v" + ver,
+		"name":     "v" + ver,
+		"draft":    false,
+	}
+	body, err := githubRequest("POST",
+		fmt.Sprintf("/repos/%s/%s/releases", owner, repo),
+		token, payload,
+	)
+	if err != nil {
+		return 0, err
+	}
+	var result struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return 0, err
+	}
+	return result.ID, nil
+}
+
+func uploadReleaseAsset(token string, releaseID int64, path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	stat, err := f.Stat()
+	if err != nil {
+		return err
+	}
+
+	name := filepath.Base(path)
+	ext := filepath.Ext(name)
+	mimeType := mime.TypeByExtension(ext)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	uploadURL := fmt.Sprintf("https://uploads.github.com/releases/%d/assets?name=%s", releaseID, name)
+
+	req, err := http.NewRequest("POST", uploadURL, f)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", mimeType)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.ContentLength = stat.Size()
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("upload failed: HTTP %d", resp.StatusCode)
+	}
+	return nil
+}

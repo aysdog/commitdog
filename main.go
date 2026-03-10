@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const version = "0.1.9"
+const version = "0.2.0"
 
 func main() {
 	if len(os.Args) > 1 {
@@ -48,6 +48,12 @@ func main() {
 			os.Exit(0)
 		case "log":
 			runLog()
+			os.Exit(0)
+		case "pr":
+			runPR()
+			os.Exit(0)
+		case "release":
+			runRelease()
 			os.Exit(0)
 		default:
 			runCommitFlow(os.Args[1:])
@@ -137,7 +143,7 @@ func runCommitFlow(files []string) {
 }
 
 func printHelp() {
-	fmt.Println(`commitdog — zero-bs commit message generator
+	fmt.Println(`commitdog — zero-bs git workflow CLI
 
 usage:
   commitdog                 stage all changes and generate commit message
@@ -145,6 +151,9 @@ usage:
 
   commitdog init            create a new GitHub repo and first push
   commitdog setup           configure email and GitHub token
+
+  commitdog log             interactive git log with colored branch graph
+                            j/k scroll  a show all  q quit
 
   commitdog revert          pick from last 5 commits and revert
 
@@ -156,11 +165,17 @@ usage:
 
   commitdog merge           merge a branch into current with preview
 
+  commitdog pr              on feature branch: create PR with diff preview
+                            on main: list open PRs, view diff, merge, close
+
   commitdog sync            fetch + pull rebase + push in one command
 
   commitdog stash           save/pop stashes interactively
                             if stashes exist: pick to pop, d# to drop, s to save
                             if no stashes: goes straight to save
+
+  commitdog release         bump version, build, tag, push, create GitHub release
+                            auto-detects Go / Node.js / Rust / Python / Java
 
   commitdog --update        update to latest version
   commitdog --version       show version and logo
@@ -179,17 +194,25 @@ workflow:
     commitdog branch        ← switch / create / delete
     commitdog switch        ← straight to branch picker
     commitdog stash         ← save work in progress
+    commitdog log           ← see branch graph and commit history
 
   branching:
     commitdog branch ls     ← see all branches
     commitdog branch create ← new branch, suggests names from diff
-    commitdog switch        ← pick from 5 recent or type name
+    commitdog switch        ← pick from recent or type name
     commitdog branch delete ← safe delete with unmerged warning
+
+  pull requests:
+    commitdog pr            ← create PR from feature branch with diff preview
+    commitdog pr            ← list + review + merge PRs when on main
+
+  releasing:
+    commitdog release       ← bump version, build, tag, push, upload to GitHub
 
   oops:
     commitdog revert        ← pick a commit to revert and push
 
-no ai. no network (except push/init). no telemetry. just works.`)
+no ai. no network (except push/init/pr/release). no telemetry. just works.`)
 }
 
 func fatal(format string, args ...interface{}) {
