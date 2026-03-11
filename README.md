@@ -36,10 +36,29 @@ commitdog reads what you actually changed and writes the message for you. You pi
 curl -fsSL https://aysdog.com/install-commitdog.sh | sh
 ```
 
+**macOS (Homebrew)**
+
+```sh
+brew tap aysdog/commitdog
+brew install commitdog
+```
+
+**Arch Linux (AUR)**
+
+```sh
+yay -S commitdog-bin
+```
+
 **Windows** — open PowerShell as Administrator and run:
 
 ```powershell
 irm https://aysdog.com/install-commitdog.ps1 | iex
+```
+
+**Windows (winget)**
+
+```sh
+winget install aysdog.commitdog
 ```
 
 downloads the binary, adds it to PATH automatically. restart your terminal and `commitdog` just works.
@@ -105,64 +124,102 @@ pick a number. press enter to push. that's the whole thing.
 
 ---
 
+## branch, sync, stash, merge
+
+```sh
+commitdog branch    # branch menu — switch, create, delete
+commitdog switch    # jump straight to branch switcher
+commitdog merge     # merge a branch into current with preview
+commitdog sync      # fetch + rebase + push in one shot
+commitdog stash     # save work in progress
+commitdog --update  # update commitdog itself
+```
+
+---
+
 ## git log with branch graph
 
 ```sh
 commitdog log
 ```
 
-interactive git log with a colored branch graph. each branch gets its own color. branch lines open and close as they diverge and merge.
-
 ```
   main
   │
-  ● e3e28ab (HEAD -> main, origin/main)  Revert "feat: add a, add b, add c"
+  ● e3e28ab (HEAD -> main)  Revert "Merge branch 'feat_3'"
   │
-  ● 160bf5a  Merge branch 'bugtest'
+  ● 160bf5a  Merge branch 'feat_3'
   ├─╮
-  │ ● 1d85daf (origin/bugtest, bugtest)  chore: add test.com
-  │
-  ● 831ee73  feat: add a, add b, add c
-  │
-  ● ba0e2e6  feat(emptyfile): add emptyfile to emptyfolder
-  │
-  ● 4b55999  init: bootstrap bugtest
+  │ ● 1d85daf (feat_3)  feat: add new feature
+  │ 
+  ●     831ee73  feat: add a, add b, add c
   │
 ```
 
-```
-  j / ↓   scroll down
-  k / ↑   scroll up
-  a       show all commits (default: 20)
-  q       quit
-```
+each branch gets its own color. `j`/`k` scroll · `a` show all · `q` quit
 
 ---
 
-## branch, sync, stash, merge
+## pull requests
 
 ```sh
-# branch menu — switch, create, delete
-commitdog branch
-
-# jump straight to branch switcher
-commitdog switch
-
-# create a new branch (suggests names from your staged diff)
-commitdog branch create
-
-# merge a branch into current with preview
-commitdog merge
-
-# fetch + rebase + push in one shot
-commitdog sync
-
-# save work in progress
-commitdog stash
-
-# update commitdog itself
-commitdog --update
+commitdog pr
 ```
+
+on a feature branch — opens an interactive diff viewer then creates the PR. on main — lists open PRs, lets you review the diff, merge, or close.
+
+```
+  creating PR: feat_3 → main
+
+  ┌─ config.go           +23 -4  ██████████░░░░░░
+  └─ README.md           +5  -2  █████░░░░░░░░░░░
+
+  2 files changed  +28 -6
+
+  [↑/↓] navigate  [enter] view diff  [c] create PR  [q] quit
+```
+
+merge strategies: merge commit · squash · rebase. deletes the remote branch after merge.
+
+---
+
+## release
+
+```sh
+commitdog release
+```
+
+```
+  detected: Go  ·  current version: v0.2.1
+
+  1  patch  →  v0.2.2
+  2  minor  →  v0.3.0
+  3  major  →  v1.0.0
+  4  custom
+
+  [1/2/3/4/q] pick › 1
+
+  bumping version in main.go...              ✓
+  building linux/amd64...                    ✓
+  building linux/arm64...                    ✓
+  building darwin/amd64...                   ✓
+  building darwin/arm64...                   ✓
+  building windows/amd64...                  ✓
+  committing...                              ✓
+  tagging v0.2.2...                          ✓
+  pushing...                                 ✓
+  creating GitHub release...                 ✓
+  uploading commitdog-linux-amd64...         ✓
+  uploading commitdog-linux-arm64...         ✓
+  uploading commitdog-darwin-amd64...        ✓
+  uploading commitdog-darwin-arm64...        ✓
+  uploading commitdog-windows-amd64.exe...   ✓
+
+  ✓ v0.2.2 released
+  https://github.com/aysdog/commitdog/releases/tag/v0.2.2
+```
+
+auto-detects Go · Node.js · Rust · Python · Java. if no version file exists, offers to create one.
 
 ---
 
@@ -172,65 +229,38 @@ commitdog --update
 commitdog revert
 ```
 
+handles merge commits too — shows a branch picker instead of crashing.
+
 ```
   recent commits:
 
-  1  63baabe  docs(dummy): update dummy       (2 minutes ago)
-  2  3b7486d  feat(auth): add refreshToken    (1 hour ago)
-  3  c90ace2  refactor: update 10 files       (6 hours ago)
-  4  57f7669  refactor(docs): update docs     (6 hours ago)
-  5  4403b0f  refactor: update 13 files       (6 hours ago)
+  1  63baabe  Merge branch 'feat_3'         (2 minutes ago)
+  2  3b7486d  feat(auth): add refreshToken   (1 hour ago)
+  3  c90ace2  refactor: update 10 files      (6 hours ago)
 
-  [1-5] pick, [e] enter hash, [q] quit › 1
+  [1-3] pick, [e] enter hash, [q] quit › 1
 
-  reverting 63baabe — docs(dummy): update dummy
-  ⚠  this creates a new revert commit. continue? [Y/n] ›
+  this is a merge commit. which side to revert to?
+
+  1  main    (undo the merge entirely)
+  2  feat_3  (the branch that was merged in)
+
+  [1/2] › 1
 
   ✓ reverted 63baabe
-
-  push to origin/main? [Y/n] ›
   ✓ pushed to origin/main
 ```
-
-pick the bad commit. confirm. done. no git syntax needed.
 
 ---
 
 ## starting a brand new project
 
-no more going to GitHub, creating a repo, copying the URL, setting the remote. commitdog does all of it:
-
 ```sh
-mkdir my-project
-cd my-project
-# add your files
+mkdir my-project && cd my-project
 commitdog init
 ```
 
-```
-  commitdog init
-
-  ✓ connected as anirbanfaith
-
-  push to personal or org? [P/o] › o
-  org name › aysdog
-  repo name [my-project] ›
-  private or public? [P/u] › u
-
-  ✓ repo created: github.com/aysdog/my-project
-
-  suggestions:
-  1  feat: initial commit
-  2  chore: initial project setup
-  3  init: bootstrap my-project
-
-  [1/2/3] pick › 1
-
-  ✓ committed: feat: initial commit
-  ✓ pushed
-
-  live at github.com/aysdog/my-project
-```
+creates the GitHub repo, git init, first commit, first push — no browser needed.
 
 ---
 
@@ -238,65 +268,31 @@ commitdog init
 
 | command | what it does |
 |---------|-------------|
-| `commitdog` | stage all changes, suggest commit message, commit, ask to push |
-| `commitdog <file>` | stage specific file, suggest commit message, commit, ask to push |
+| `commitdog` | stage all, suggest message, commit, push |
+| `commitdog <file>` | stage specific file, suggest, commit, push |
 | `commitdog log` | interactive git log with colored branch graph |
+| `commitdog pr` | create PR from feature branch · list/review/merge from main |
+| `commitdog release` | bump version, build 5 binaries, tag, push, GitHub release |
+| `commitdog branch` | branch menu — switch / create / delete |
 | `commitdog switch` | jump straight to branch switcher |
-| `commitdog branch` | branch menu — switch / create new / delete |
-| `commitdog branch create` | create new branch, suggests names from diff |
+| `commitdog branch create` | create new branch, names suggested from diff |
 | `commitdog branch ls` | list all local and remote branches |
 | `commitdog branch delete` | delete branch locally + optionally remote |
-| `commitdog merge` | merge a branch with preview, conflict detection, editor open |
-| `commitdog sync` | fetch + pull rebase + push in one command |
+| `commitdog merge` | merge with diff preview, conflict detection |
+| `commitdog sync` | fetch + pull rebase + push |
 | `commitdog stash` | save, pop, or drop stashes interactively |
-| `commitdog revert` | pick from last 5 commits and revert |
-| `commitdog init` | create a GitHub repo and do the first push |
-| `commitdog setup` | configure email and GitHub token (do once) |
-| `commitdog --update` | update to latest release automatically |
-| `commitdog --version` | print version and ascii art |
-| `commitdog --help` | print full help |
+| `commitdog revert` | pick from last 5 commits, revert, handles merge commits |
+| `commitdog init` | create GitHub repo, first commit, first push |
+| `commitdog setup` | configure email and GitHub token (once) |
+| `commitdog --update` | update to latest release |
+| `commitdog --version` | print version with ascii art |
+| `commitdog --help` | print help |
 
 ---
 
 ## how it figures out the message
 
-commitdog parses `git diff --staged` and looks at:
-
-```
-what files changed?
-  → source, test, config, docs, migration?
-
-what functions were added, removed, or renamed?
-  → add refreshToken, rename oldAuth to newAuth?
-
-what variables or constants changed?
-  → new config keys, removed constants?
-
-what's the branch name?
-  → fix/token-refresh → commit type is fix
-  → feat/new-auth → commit type is feat
-
-what's the main folder/module?
-  → auth, api, db?
-```
-
-then generates 4 suggestions in [conventional commits](https://www.conventionalcommits.org) format and lets you pick.
-
-### commit types it detects
-
-| what changed | type |
-|-------------|------|
-| new function added | `feat` |
-| function removed or renamed | `refactor` |
-| branch named `fix/*` or `bugfix/*` | `fix` |
-| branch named `feat/*` or `feature/*` | `feat` |
-| only tests changed | `test` |
-| only docs/README | `docs` |
-| error handling added | `fix` |
-| config file changed | `chore` |
-| dependencies updated | `chore` |
-| migration file added | `feat` |
-| debug logs removed | `chore` |
+commitdog parses `git diff --staged` and looks at what files changed, what functions were added or removed, what the branch name suggests, and what module or folder is affected. then generates 4 variations in [conventional commits](https://www.conventionalcommits.org) format.
 
 ### languages supported
 
@@ -306,17 +302,14 @@ Go · JavaScript · TypeScript · Python · Ruby · Rust · Java · Kotlin
 
 ## security
 
-commitdog is designed to never leak your data.
-
 | concern | how it's handled |
 |---------|-----------------|
 | shell injection | all git commands use `exec.Command` with explicit args — no shell |
 | token storage | saved with `0600` permissions — only you can read it |
-| token in git ops | never used — SSH or HTTPS handles push, token only for API |
-| diff size | capped at 200KB — no memory issues |
-| commit messages | sanitized before passing to git |
-| network | zero outbound except `commitdog init` (GitHub API) and push/sync (your git remote) |
-| dependencies | pure Go stdlib — no third-party packages |
+| token in git ops | never used — SSH or HTTPS handles push, token only for GitHub API |
+| diff size | capped at 200KB |
+| network | zero outbound except `init`/`pr`/`release` GitHub API calls and your git remote |
+| dependencies | pure Go stdlib — zero third-party packages |
 
 you can read the entire source in 20 minutes. nothing is hidden.
 
@@ -326,14 +319,13 @@ you can read the entire source in 20 minutes. nothing is hidden.
 
 | version | what shipped |
 |---------|-------------|
-| v0.1.8  | `commitdog log` — interactive git log with colored branch graph |
-| v0.1.7  | empty file tracking, empty dir warnings, better init suggestions, multi-file summary |
-| v0.1.6  | release workflow fixes |
-| v0.1.5  | ascii build tag fix, binary size optimization |
-| v0.1.4  | branch, sync, stash, self-update, ascii art |
-| v0.1.3  | revert command, Windows installer |
-| v0.1.2  | setup, init, GitHub API, config |
-| v0.1.0  | initial release |
+| v0.2.1 | Homebrew · AUR · winget · smart version init for unknown project types |
+| v0.2.0 | `commitdog pr` · `commitdog release` · interactive diff viewer · log graph fixes |
+| v0.1.9 | HTTPS remote auto-fix to SSH · merge commit revert with branch picker |
+| v0.1.8 | `commitdog log` with colored branch graph · fastfetch-style `--version` |
+| v0.1.4 | branch · sync · stash · self-update · ascii art |
+| v0.1.2 | revert · Windows installer |
+| v0.1.0 | initial release |
 
 ---
 
