@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"os"
 	"os/exec"
@@ -78,6 +77,104 @@ var releaseProjects = []releaseProject{
 			return re.ReplaceAllString(content, "<version>"+newVer+"</version>")
 		},
 	},
+	{
+		lang:    "any",
+		file:    "VERSION",
+		pattern: regexp.MustCompile(`^([0-9]+\.[0-9]+\.[0-9]+)`),
+		replace: func(content, newVer string) string {
+			re := regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+`)
+			return re.ReplaceAllString(content, newVer)
+		},
+	},
+}
+
+func runVersionInit() (*releaseProject, string) {
+	fmt.Println()
+	fmt.Println("  could not find a version file.")
+	fmt.Println()
+
+	mainPy := detectMainPy()
+
+	fmt.Println("  1  create pyproject.toml  (recommended for Python)")
+	if mainPy != "" {
+		fmt.Printf("  2  add __version__ to %s\n", mainPy)
+	} else {
+		fmt.Println("  2  add __version__ to main python file")
+	}
+	fmt.Println("  3  create VERSION file     (works for any language)")
+	fmt.Println("  4  enter version manually  (one time, no file created)")
+	fmt.Println()
+	fmt.Printf("  [1/2/3/4/q] pick › ")
+
+	for {
+		input := strings.TrimSpace(readLine())
+		switch input {
+		case "1":
+			if err := os.WriteFile("pyproject.toml", []byte("[project]\nname = \"app\"\nversion = \"0.1.0\"\n"), 0644); err != nil {
+				fatal("could not create pyproject.toml: %v", err)
+			}
+			fmt.Println("  ✓ created pyproject.toml with version 0.1.0")
+			p := &releaseProjects[3]
+			return p, "0.1.0"
+		case "2":
+			target := mainPy
+			if target == "" {
+				fmt.Printf("  python file name › ")
+				target = strings.TrimSpace(readLine())
+			}
+			data, _ := os.ReadFile(target)
+			updated := "__version__ = \"0.1.0\"\n" + string(data)
+			if err := os.WriteFile(target, []byte(updated), 0644); err != nil {
+				fatal("could not write to %s: %v", target, err)
+			}
+			fmt.Printf("  ✓ added __version__ to %s\n", target)
+			p := &releaseProject{
+				lang:    "Python",
+				file:    target,
+				pattern: regexp.MustCompile(`__version__\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"`),
+				replace: func(content, newVer string) string {
+					re := regexp.MustCompile(`(__version__\s*=\s*)"[0-9]+\.[0-9]+\.[0-9]+"`)
+					return re.ReplaceAllString(content, `${1}"`+newVer+`"`)
+				},
+			}
+			return p, "0.1.0"
+		case "3":
+			if err := os.WriteFile("VERSION", []byte("0.1.0\n"), 0644); err != nil {
+				fatal("could not create VERSION: %v", err)
+			}
+			fmt.Println("  ✓ created VERSION file with 0.1.0")
+			p := &releaseProjects[len(releaseProjects)-1]
+			return p, "0.1.0"
+		case "4":
+			fmt.Printf("  version › ")
+			ver := strings.TrimSpace(readLine())
+			ver = strings.TrimPrefix(ver, "v")
+			if !isValidSemver(ver) {
+				fmt.Printf("  invalid semver (e.g. 1.0.0) › ")
+				continue
+			}
+			p := &releaseProject{
+				lang:    "manual",
+				file:    "",
+				replace: func(content, newVer string) string { return content },
+			}
+			return p, ver
+		case "q", "":
+			return nil, ""
+		default:
+			fmt.Printf("  1, 2, 3, 4, or q › ")
+		}
+	}
+}
+
+func detectMainPy() string {
+	candidates := []string{"main.py", "app.py", "run.py", "server.py", "__init__.py"}
+	for _, f := range candidates {
+		if _, err := os.Stat(f); err == nil {
+			return f
+		}
+	}
+	return ""
 }
 
 func runRelease() {
@@ -97,7 +194,11 @@ func runRelease() {
 
 	proj, fileVer := detectProject()
 	if proj == nil {
-		fatal("could not detect project type. supported: Go, Node.js, Rust, Python, Java.")
+		proj, fileVer = runVersionInit()
+		if proj == nil {
+			fmt.Println("  aborted.")
+			return
+		}
 	}
 
 	currentVer := getLatestGitTag()
@@ -212,21 +313,21 @@ func runRelease() {
 		return nil
 	})
 
-	var releaseID int64
+	var uploadURL string
 	printStep("creating GitHub release...", func() error {
-		id, err := createGitHubRelease(cfg.Token, owner, repo, nextVer)
+		_, url, err := createGitHubRelease(cfg.Token, owner, repo, nextVer)
 		if err != nil {
 			return err
 		}
-		releaseID = id
+		uploadURL = url
 		return nil
 	})
 
-	if isGo && releaseID != 0 {
+	if isGo && uploadURL != "" {
 		for _, bin := range binaries {
 			b := bin
 			printStep("uploading "+b+"...", func() error {
-				return uploadReleaseAsset(cfg.Token, releaseID, b)
+				return uploadReleaseAsset(cfg.Token, uploadURL, b)
 			})
 		}
 		for _, bin := range binaries {
@@ -275,6 +376,9 @@ func detectProject() (*releaseProject, string) {
 }
 
 func bumpVersion(proj *releaseProject, newVer string) error {
+	if proj.file == "" {
+		return nil
+	}
 	data, err := os.ReadFile(proj.file)
 	if err != nil {
 		return err
@@ -308,7 +412,21 @@ func isValidSemver(s string) bool {
 	return true
 }
 
-func createGitHubRelease(token, owner, repo, ver string) (int64, error) {
+func createGitHubRelease(token, owner, repo, ver string) (int64, string, error) {
+	existing, err := githubRequest("GET",
+		fmt.Sprintf("/repos/%s/%s/releases/tags/v%s", owner, repo, ver),
+		token, nil,
+	)
+	if err == nil {
+		var result struct {
+			ID        int64  `json:"id"`
+			UploadURL string `json:"upload_url"`
+		}
+		if json.Unmarshal(existing, &result) == nil && result.ID != 0 {
+			return result.ID, strings.Split(result.UploadURL, "{")[0], nil
+		}
+	}
+
 	payload := map[string]interface{}{
 		"tag_name": "v" + ver,
 		"name":     "v" + ver,
@@ -319,18 +437,19 @@ func createGitHubRelease(token, owner, repo, ver string) (int64, error) {
 		token, payload,
 	)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	var result struct {
-		ID int64 `json:"id"`
+		ID        int64  `json:"id"`
+		UploadURL string `json:"upload_url"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return 0, err
+		return 0, "", err
 	}
-	return result.ID, nil
+	return result.ID, strings.Split(result.UploadURL, "{")[0], nil
 }
 
-func uploadReleaseAsset(token string, releaseID int64, path string) error {
+func uploadReleaseAsset(token, uploadURL, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -343,20 +462,14 @@ func uploadReleaseAsset(token string, releaseID int64, path string) error {
 	}
 
 	name := filepath.Base(path)
-	ext := filepath.Ext(name)
-	mimeType := mime.TypeByExtension(ext)
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
+	url := uploadURL + "?name=" + name
 
-	uploadURL := fmt.Sprintf("https://uploads.github.com/releases/%d/assets?name=%s", releaseID, name)
-
-	req, err := http.NewRequest("POST", uploadURL, f)
+	req, err := http.NewRequest("POST", url, f)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", mimeType)
+	req.Header.Set("Content-Type", "application/octet-stream")
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.ContentLength = stat.Size()
 
@@ -366,10 +479,10 @@ func uploadReleaseAsset(token string, releaseID int64, path string) error {
 		return err
 	}
 	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("upload failed: HTTP %d", resp.StatusCode)
+		return fmt.Errorf("upload failed: HTTP %d — %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 	return nil
 }
