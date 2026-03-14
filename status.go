@@ -281,17 +281,27 @@ type statusBranch struct {
 }
 
 func statusCommits() []statusCommit {
-	out := gitOut("log", "--pretty=format:%h %s", "-5")
+	out := gitOut("log", "--pretty=format:%h|%s", "-5")
 	var result []statusCommit
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) == 2 {
-			result = append(result, statusCommit{short: parts[0], subject: parts[1]})
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) != 2 {
+			continue
 		}
+		hash := strings.TrimSpace(parts[0])
+		if len(hash) < 6 || len(hash) > 12 {
+			continue
+		}
+		subj := strings.TrimSpace(parts[1])
+		runes := []rune(subj)
+		if len(runes) > 40 {
+			subj = string(runes[:39]) + "…"
+		}
+		result = append(result, statusCommit{short: hash, subject: subj})
 	}
 	return result
 }
