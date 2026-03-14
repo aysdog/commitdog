@@ -199,6 +199,12 @@ commitdog release
 
   [1/2/3/4/q] pick › 1
 
+  changelog preview:
+  ### Features
+  - feat: add status dashboard, log graph, changelog
+
+  release v0.2.1 → v0.2.2?  [y/n] › y
+
   bumping version in main.go...              ✓
   building linux/amd64...                    ✓
   building linux/arm64...                    ✓
@@ -214,12 +220,36 @@ commitdog release
   uploading commitdog-darwin-amd64...        ✓
   uploading commitdog-darwin-arm64...        ✓
   uploading commitdog-windows-amd64.exe...   ✓
+  uploading checksums.txt...                 ✓
 
   ✓ v0.2.2 released
   https://github.com/aysdog/commitdog/releases/tag/v0.2.2
 ```
 
 auto-detects Go · Node.js · Rust · Python · Java. if no version file exists, offers to create one.
+
+---
+
+## project status dashboard
+
+```sh
+commitdog status
+```
+
+shows a two-column dashboard: latest commits and pending PRs on the left, project info, branch list, and issues on the right. fetches live data from your git repo and GitHub (if token is set).
+
+---
+
+## package manager automation
+
+after releasing, push to Homebrew and AUR in one command each:
+
+```sh
+commitdog updatebrew   # updates aysdog/homebrew-commitdog tap
+commitdog updateaur    # updates AUR PKGBUILD + .SRCINFO via SSH
+```
+
+both commands read the latest release tag and checksums automatically — no manual SHA256 copying.
 
 ---
 
@@ -272,7 +302,12 @@ creates the GitHub repo, git init, first commit, first push — no browser neede
 | `commitdog <file>` | stage specific file, suggest, commit, push |
 | `commitdog log` | interactive git log with colored branch graph |
 | `commitdog pr` | create PR from feature branch · list/review/merge from main |
-| `commitdog release` | bump version, build 5 binaries, tag, push, GitHub release |
+| `commitdog release` | bump version, build binaries, tag, push, GitHub release + changelog |
+| `commitdog release --changelog-only` | preview changelog without releasing |
+| `commitdog release --init-ci` | generate .github/workflows/release.yml |
+| `commitdog updatebrew` | update Homebrew tap to latest release |
+| `commitdog updateaur` | update AUR PKGBUILD to latest release |
+| `commitdog status` | project dashboard: commits, branches, PRs, info |
 | `commitdog branch` | branch menu — switch / create / delete |
 | `commitdog switch` | jump straight to branch switcher |
 | `commitdog branch create` | create new branch, names suggested from diff |
@@ -319,6 +354,7 @@ you can read the entire source in 20 minutes. nothing is hidden.
 
 | version | what shipped |
 |---------|-------------|
+| v0.2.2 | `commitdog status` dashboard · log graph renderer · auto-changelog · SHA256 checksums · Homebrew + AUR automation |
 | v0.2.1 | Homebrew · AUR · winget · smart version init for unknown project types |
 | v0.2.0 | `commitdog pr` · `commitdog release` · interactive diff viewer · log graph fixes |
 | v0.1.9 | HTTPS remote auto-fix to SSH · merge commit revert with branch picker |
@@ -344,4 +380,4 @@ everything else is negotiable.
 
 commitdog is part of [aysdog](https://aysdog.com) — open-source tools for developers who hate bloat.
 
-zero telemetry · self-hostable · single binary · MIT licensed
+zero telemetry · no bloat · single binary · MIT licensed

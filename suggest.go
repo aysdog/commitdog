@@ -33,15 +33,26 @@ func generateSuggestions(a analysis) []string {
 	return suggestions
 }
 
+func capMessage(s string) string {
+	runes := []rune(s)
+	if len(runes) <= 72 {
+		return s
+	}
+	return string(runes[:69]) + "..."
+}
+
 func buildPrimary(a analysis) string {
 	t := a.commitType
 	scope := a.primaryScope
 	desc := buildDescription(a)
 
+	var msg string
 	if scope != "" {
-		return fmt.Sprintf("%s(%s): %s", t, scope, desc)
+		msg = fmt.Sprintf("%s(%s): %s", t, scope, desc)
+	} else {
+		msg = fmt.Sprintf("%s: %s", t, desc)
 	}
-	return fmt.Sprintf("%s: %s", t, desc)
+	return capMessage(msg)
 }
 
 func buildAlternate(a analysis) string {
@@ -50,7 +61,7 @@ func buildAlternate(a analysis) string {
 	if desc == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s: %s", t, desc)
+	return capMessage(fmt.Sprintf("%s: %s", t, desc))
 }
 
 func buildBrief(a analysis) string {
@@ -116,23 +127,36 @@ func buildFallback(a analysis) string {
 func buildSummary(a analysis) string {
 	var parts []string
 
-	for _, f := range a.filesAdded {
+	for _, f := range firstN(a.filesAdded, 2) {
 		parts = append(parts, "add "+cleanFileName(f))
 	}
 
 	if len(a.filesModified) > 0 {
 		if len(a.addedFuncs) > 0 {
-			parts = append(parts, "add "+joinNames(a.addedFuncs))
+			funcs := firstN(a.addedFuncs, 2)
+			desc := "add " + joinNames(funcs)
+			if len(a.addedFuncs) > 2 {
+				desc += fmt.Sprintf(" +%d more", len(a.addedFuncs)-2)
+			}
+			parts = append(parts, desc)
 		} else if len(a.removedFuncs) > 0 {
-			parts = append(parts, "remove "+joinNames(a.removedFuncs))
+			funcs := firstN(a.removedFuncs, 2)
+			desc := "remove " + joinNames(funcs)
+			if len(a.removedFuncs) > 2 {
+				desc += fmt.Sprintf(" +%d more", len(a.removedFuncs)-2)
+			}
+			parts = append(parts, desc)
 		} else {
-			for _, f := range a.filesModified {
+			for _, f := range firstN(a.filesModified, 2) {
 				parts = append(parts, "update "+cleanFileName(f))
+			}
+			if len(a.filesModified) > 2 {
+				parts = append(parts, fmt.Sprintf("+%d more files", len(a.filesModified)-2))
 			}
 		}
 	}
 
-	for _, f := range a.filesDeleted {
+	for _, f := range firstN(a.filesDeleted, 1) {
 		parts = append(parts, "remove "+cleanFileName(f))
 	}
 
@@ -149,7 +173,8 @@ func buildSummary(a analysis) string {
 		}
 	}
 
-	return fmt.Sprintf("%s: %s", a.commitType, strings.Join(unique, ", "))
+	msg := fmt.Sprintf("%s: %s", a.commitType, strings.Join(unique, ", "))
+	return capMessage(msg)
 }
 
 func buildDescription(a analysis) string {
