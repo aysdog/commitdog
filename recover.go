@@ -17,6 +17,26 @@ type recovery struct {
 func detectAndRecover(stderr string) *recovery {
 	msg := strings.ToLower(stderr)
 
+	if strings.Contains(msg, "already exists") && strings.Contains(msg, "tag") {
+		tag := extractTagFromError(stderr)
+		return &recovery{
+			message: fmt.Sprintf("tag %s already exists on remote", tag),
+			hint:    "delete the remote tag and retry",
+			autoFix: func() error {
+				fmt.Printf("  deleting remote tag %s...\n", tag)
+				cmd := exec.Command("git", "push", "origin", ":refs/tags/"+tag)
+				var stderr bytes.Buffer
+				cmd.Stderr = &stderr
+				if err := cmd.Run(); err != nil {
+					return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
+				}
+				exec.Command("git", "tag", "-d", tag).Run()
+				fmt.Printf("  %s deleted. run commitdog release again.\n", tag)
+				return nil
+			},
+		}
+	}
+
 	if strings.Contains(msg, "conflict") || strings.Contains(msg, "could not apply") {
 		files, _ := getConflictedFiles()
 		return &recovery{
@@ -252,6 +272,33 @@ func detectActualRemote() string {
 func autoFixRemoteName(correct string) error {
 	fmt.Printf("  updating remote references to use '%s'...\n", correct)
 	return nil
+}
+
+func extractTagFromError(stderr string) string {
+	for _, line := range strings.Split(stderr, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "[rejected]") {
+			parts := strings.Fields(line)
+			for i, p := range parts {
+				if p == "->" && i > 0 {
+					tag := strings.TrimSpace(parts[i-1])
+					if tag != "" {
+						return tag
+					}
+				}
+			}
+		}
+	}
+	for _, line := range strings.Split(stderr, "\n") {
+		parts := strings.Fields(strings.TrimSpace(line))
+		for _, p := range parts {
+			p = strings.TrimPrefix(p, "refs/tags/")
+			if strings.HasPrefix(p, "v") && len(p) > 1 {
+				return p
+			}
+		}
+	}
+	return "unknown"
 }
 
 func colorGreen(s string) string {

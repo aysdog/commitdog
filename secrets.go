@@ -100,15 +100,14 @@ func isLikelyTestOrExample(file, line string) bool {
 
 	if strings.Contains(file, "_test") || strings.Contains(file, "test_") ||
 		strings.Contains(file, ".test.") || strings.Contains(file, "spec") ||
-		strings.Contains(file, "example") || strings.Contains(file, "fixture") ||
-		strings.Contains(file, "mock") || strings.Contains(file, "fake") {
+		strings.Contains(file, "fixture") || strings.Contains(file, "mock") ||
+		strings.Contains(file, "fake") {
 		return true
 	}
 
-	if strings.Contains(line, "example") || strings.Contains(line, "placeholder") ||
+	if strings.Contains(line, "placeholder") ||
 		strings.Contains(line, "your_") || strings.Contains(line, "<your") ||
-		strings.Contains(line, "xxx") || strings.Contains(line, "dummy") ||
-		strings.Contains(line, "changeme") || strings.Contains(line, "todo") {
+		strings.Contains(line, "changeme") {
 		return true
 	}
 

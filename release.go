@@ -261,6 +261,9 @@ func runRelease() {
 
 	fmt.Println()
 
+	preReleaseHash, _ := exec.Command("git", "rev-parse", "HEAD").Output()
+	preRelease := strings.TrimSpace(string(preReleaseHash))
+
 	var undos []undoStep
 
 	printStepOrRollback("bumping version in "+proj.file+"...", &undos, func() error {
@@ -301,7 +304,6 @@ func runRelease() {
 		}
 	}
 
-	var commitHash string
 	printStepOrRollback("committing...", &undos, func() error {
 		exec.Command("git", "add", ".").Run()
 		cmd := exec.Command("git", "commit", "-m", "chore: release v"+nextVer)
@@ -310,13 +312,9 @@ func runRelease() {
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
 		}
-		out, _ := exec.Command("git", "rev-parse", "HEAD").Output()
-		commitHash = strings.TrimSpace(string(out))
 		return nil
 	}, func() error {
-		if commitHash != "" {
-			exec.Command("git", "revert", "--no-edit", commitHash).Run()
-		}
+		exec.Command("git", "reset", "--hard", preRelease).Run()
 		return nil
 	})
 
@@ -351,18 +349,31 @@ func runRelease() {
 		return nil
 	}, func() error {
 		exec.Command("git", "push", "origin", ":refs/tags/v"+nextVer).Run()
+		if preRelease != "" {
+			exec.Command("git", "push", "origin", preRelease+":main", "--force").Run()
+		}
 		return nil
 	})
 
+	var releaseID int64
 	var uploadURL string
 	printStepOrRollback("creating GitHub release...", &undos, func() error {
-		_, url, err := createGitHubRelease(cfg.Token, owner, repo, nextVer)
+		id, url, err := createGitHubRelease(cfg.Token, owner, repo, nextVer)
 		if err != nil {
 			return err
 		}
+		releaseID = id
 		uploadURL = url
 		return nil
-	}, nil)
+	}, func() error {
+		if releaseID != 0 {
+			githubRequest("DELETE",
+				fmt.Sprintf("/repos/%s/%s/releases/%d", owner, repo, releaseID),
+				cfg.Token, nil,
+			)
+		}
+		return nil
+	})
 
 	if isGo && uploadURL != "" {
 		for _, bin := range binaries {
@@ -410,14 +421,21 @@ func printStepOrRollback(label string, undos *[]undoStep, fn func() error, undo 
 }
 
 func getLatestGitTag() string {
-	cmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
+	cmd := exec.Command("git", "tag", "--sort=-version:refname")
 	cmd.Env = append(os.Environ(), "GIT_PAGER=cat")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
 		return ""
 	}
-	return strings.TrimPrefix(strings.TrimSpace(out.String()), "v")
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return strings.TrimPrefix(line, "v")
+		}
+	}
+	return ""
 }
 
 func detectProject() (*releaseProject, string) {

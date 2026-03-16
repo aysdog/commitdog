@@ -10,7 +10,7 @@ const version = "0.2.2"
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "--version", "-v":
+		case "version", "-v":
 			printAsciiArt()
 			os.Exit(0)
 		case "--help", "-h":
