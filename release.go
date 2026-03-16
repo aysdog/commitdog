@@ -177,6 +177,11 @@ func detectMainPy() string {
 	return ""
 }
 
+type undoStep struct {
+	label string
+	fn    func() error
+}
+
 func runRelease() {
 	if err := verifyGitRepo(); err != nil {
 		fatal("not a git repository.")
@@ -201,7 +206,17 @@ func runRelease() {
 		}
 	}
 
-	currentVer := getLatestGitTag()
+	gitTag := getLatestGitTag()
+	if gitTag != "" && fileVer != gitTag {
+		fmt.Printf("\n  %s version drift: %s says v%s but latest git tag is v%s\n", colorRed("!"), proj.file, fileVer, gitTag)
+		fmt.Printf("  release anyway? [y/N] › ")
+		if in := readLine(); in != "y" && in != "yes" {
+			fmt.Println("  aborted. fix the version mismatch first.")
+			return
+		}
+	}
+
+	currentVer := gitTag
 	if currentVer == "" {
 		currentVer = fileVer
 	}
@@ -228,8 +243,7 @@ func runRelease() {
 			nextVer = fmt.Sprintf("%d.%d.%d", major+1, 0, 0)
 		case "4":
 			fmt.Printf("  version › ")
-			custom := strings.TrimSpace(readLine())
-			custom = strings.TrimPrefix(custom, "v")
+			custom := strings.TrimPrefix(strings.TrimSpace(readLine()), "v")
 			if !isValidSemver(custom) {
 				fmt.Printf("  invalid semver (e.g. 1.2.3) › ")
 				continue
@@ -247,8 +261,12 @@ func runRelease() {
 
 	fmt.Println()
 
-	printStep("bumping version in "+proj.file+"...", func() error {
+	var undos []undoStep
+
+	printStepOrRollback("bumping version in "+proj.file+"...", &undos, func() error {
 		return bumpVersion(proj, nextVer)
+	}, func() error {
+		return bumpVersion(proj, currentVer)
 	})
 
 	isGo := proj.lang == "Go"
@@ -265,10 +283,8 @@ func runRelease() {
 		for _, t := range targets {
 			name := fmt.Sprintf("%s-%s-%s%s", repo, t.goos, t.goarch, t.suffix)
 			label := fmt.Sprintf("building %s/%s...", t.goos, t.goarch)
-			goos := t.goos
-			goarch := t.goarch
-			n := name
-			printStep(label, func() error {
+			goos, goarch, n := t.goos, t.goarch, name
+			printStepOrRollback(label, &undos, func() error {
 				cmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", n, ".")
 				cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch)
 				var stderr bytes.Buffer
@@ -277,12 +293,16 @@ func runRelease() {
 					return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
 				}
 				return nil
+			}, func() error {
+				os.Remove(n)
+				return nil
 			})
 			binaries = append(binaries, name)
 		}
 	}
 
-	printStep("committing...", func() error {
+	var commitHash string
+	printStepOrRollback("committing...", &undos, func() error {
 		exec.Command("git", "add", ".").Run()
 		cmd := exec.Command("git", "commit", "-m", "chore: release v"+nextVer)
 		var stderr bytes.Buffer
@@ -290,10 +310,17 @@ func runRelease() {
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
 		}
+		out, _ := exec.Command("git", "rev-parse", "HEAD").Output()
+		commitHash = strings.TrimSpace(string(out))
+		return nil
+	}, func() error {
+		if commitHash != "" {
+			exec.Command("git", "revert", "--no-edit", commitHash).Run()
+		}
 		return nil
 	})
 
-	printStep("tagging v"+nextVer+"...", func() error {
+	printStepOrRollback("tagging v"+nextVer+"...", &undos, func() error {
 		cmd := exec.Command("git", "tag", "v"+nextVer)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
@@ -301,34 +328,48 @@ func runRelease() {
 			return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
 		}
 		return nil
+	}, func() error {
+		exec.Command("git", "tag", "-d", "v"+nextVer).Run()
+		return nil
 	})
 
-	printStep("pushing...", func() error {
+	printStepOrRollback("pushing...", &undos, func() error {
 		cmd := exec.Command("git", "push", "origin", "main", "--tags")
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
+			msg := strings.TrimSpace(stderr.String())
+			r := detectAndRecover(msg)
+			if r != nil {
+				fmt.Println()
+				if offerRecovery(r) {
+					return nil
+				}
+			}
+			return fmt.Errorf("%s", msg)
 		}
+		return nil
+	}, func() error {
+		exec.Command("git", "push", "origin", ":refs/tags/v"+nextVer).Run()
 		return nil
 	})
 
 	var uploadURL string
-	printStep("creating GitHub release...", func() error {
+	printStepOrRollback("creating GitHub release...", &undos, func() error {
 		_, url, err := createGitHubRelease(cfg.Token, owner, repo, nextVer)
 		if err != nil {
 			return err
 		}
 		uploadURL = url
 		return nil
-	})
+	}, nil)
 
 	if isGo && uploadURL != "" {
 		for _, bin := range binaries {
 			b := bin
-			printStep("uploading "+b+"...", func() error {
+			printStepOrRollback("uploading "+b+"...", &undos, func() error {
 				return uploadReleaseAsset(cfg.Token, uploadURL, b)
-			})
+			}, nil)
 		}
 		for _, bin := range binaries {
 			os.Remove(bin)
@@ -340,13 +381,32 @@ func runRelease() {
 	fmt.Printf("  https://github.com/%s/%s/releases/tag/v%s\n\n", owner, repo, nextVer)
 }
 
-func printStep(label string, fn func() error) {
+func printStepOrRollback(label string, undos *[]undoStep, fn func() error, undo func() error) {
 	fmt.Printf("  %-38s", label)
 	if err := fn(); err != nil {
 		fmt.Printf("\033[31m✗\033[0m\n")
-		fatal("%s", err)
+		fmt.Printf("\n  %s step failed: %s\n", colorRed("✗"), err)
+		if len(*undos) > 0 {
+			fmt.Printf("\n  rolling back %d step(s)...\n", len(*undos))
+			for i := len(*undos) - 1; i >= 0; i-- {
+				u := (*undos)[i]
+				fmt.Printf("  ↩  %s", u.label)
+				if rerr := u.fn(); rerr != nil {
+					fmt.Printf(" (could not undo: %s)\n", rerr)
+				} else {
+					fmt.Println(" done")
+				}
+			}
+			fmt.Println()
+			fmt.Println("  release rolled back cleanly. fix the issue and run commitdog release again.")
+		}
+		fmt.Println()
+		os.Exit(1)
 	}
 	fmt.Printf("\033[32m✓\033[0m\n")
+	if undo != nil {
+		*undos = append(*undos, undoStep{label: strings.TrimSuffix(label, "..."), fn: undo})
+	}
 }
 
 func getLatestGitTag() string {

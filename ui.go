@@ -102,13 +102,19 @@ func askPush() {
 				err = runPush(remote, branch)
 			}
 			if err != nil {
-				fmt.Printf("\n  push failed: %s\n", err)
+				fmt.Println()
+				r := detectAndRecover(err.Error())
+				if r != nil {
+					offerRecovery(r)
+					return
+				}
+				fmt.Printf("\n  %s push failed: %s\n", colorRed("✗"), err)
 			} else {
-				fmt.Printf("\n  ✓ pushed to %s/%s\n", remote, branch)
+				fmt.Printf("\n  %s pushed to %s/%s\n", colorGreen("✓"), remote, branch)
 			}
 			return
 		case "n", "no":
-			fmt.Println("  skipped. push it yourself when ready.")
+			fmt.Println("  skipped.")
 			return
 		default:
 			fmt.Printf("  Y or n › ")

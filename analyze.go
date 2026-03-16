@@ -162,6 +162,13 @@ func analyzeDiffWithBranch(diff string, branch string) analysis {
 			continue
 		}
 
+		if strings.HasPrefix(line, "Binary files") && strings.Contains(line, "differ") {
+			if currentFile != "" && !isNew && !isDeleted {
+				a.filesModified = appendUnique(a.filesModified, currentFile)
+			}
+			continue
+		}
+
 		if strings.HasPrefix(line, "---") ||
 			strings.HasPrefix(line, "index ") ||
 			strings.HasPrefix(line, "@@") {
