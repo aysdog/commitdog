@@ -5,12 +5,12 @@ import (
 	"os"
 )
 
-const version = "0.2.3"
+const version = "0.2.2"
 
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "version", "-v":
+		case "--version", "-v":
 			printAsciiArt()
 			os.Exit(0)
 		case "--help", "-h":
@@ -57,6 +57,12 @@ func main() {
 			os.Exit(0)
 		case "release":
 			runRelease()
+			os.Exit(0)
+		case "updatebrew":
+			runUpdateBrew()
+			os.Exit(0)
+		case "updateaur":
+			runUpdateAUR()
 			os.Exit(0)
 		default:
 			runCommitFlow(os.Args[1:])

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -187,6 +186,18 @@ func runRelease() {
 		fatal("not a git repository.")
 	}
 
+	if len(os.Args) > 2 && os.Args[2] == "--changelog-only" {
+		cl := buildChangelog(getLatestGitTag())
+		fmt.Println()
+		fmt.Println(cl)
+		return
+	}
+
+	if len(os.Args) > 2 && os.Args[2] == "--init-ci" {
+		runInitCI()
+		return
+	}
+
 	cfg := loadConfig()
 	if cfg.Token == "" {
 		fatal("no GitHub token found. run 'commitdog setup' first.")
@@ -259,6 +270,19 @@ func runRelease() {
 		break
 	}
 
+	changelog := buildChangelog(currentVer)
+	fmt.Println()
+	fmt.Println("  changelog preview:")
+	fmt.Println()
+	for _, line := range strings.Split(changelog, "\n") {
+		fmt.Println("  " + line)
+	}
+	fmt.Println()
+	fmt.Printf("  release v%s → v%s? [y/n] › ", currentVer, nextVer)
+	if confirm := readLine(); confirm != "y" && confirm != "yes" {
+		fmt.Println("  aborted.")
+		return
+	}
 	fmt.Println()
 
 	preReleaseHash, _ := exec.Command("git", "rev-parse", "HEAD").Output()
@@ -358,7 +382,7 @@ func runRelease() {
 	var releaseID int64
 	var uploadURL string
 	printStepOrRollback("creating GitHub release...", &undos, func() error {
-		id, url, err := createGitHubRelease(cfg.Token, owner, repo, nextVer)
+		id, url, err := createGitHubReleaseWithBody(cfg.Token, owner, repo, nextVer, changelog)
 		if err != nil {
 			return err
 		}
@@ -376,14 +400,27 @@ func runRelease() {
 	})
 
 	if isGo && uploadURL != "" {
+		sha256lines := []string{}
 		for _, bin := range binaries {
 			b := bin
 			printStepOrRollback("uploading "+b+"...", &undos, func() error {
 				return uploadReleaseAsset(cfg.Token, uploadURL, b)
 			}, nil)
+			sum := fileSHA256(b)
+			if sum != "" {
+				sha256lines = append(sha256lines, sum+"  "+b)
+			}
 		}
 		for _, bin := range binaries {
 			os.Remove(bin)
+		}
+		if len(sha256lines) > 0 {
+			checksumFile := "checksums.txt"
+			os.WriteFile(checksumFile, []byte(strings.Join(sha256lines, "\n")+"\n"), 0644)
+			printStepOrRollback("uploading checksums.txt...", &undos, func() error {
+				return uploadReleaseAsset(cfg.Token, uploadURL, checksumFile)
+			}, nil)
+			os.Remove(checksumFile)
 		}
 	}
 
@@ -488,43 +525,6 @@ func isValidSemver(s string) bool {
 		}
 	}
 	return true
-}
-
-func createGitHubRelease(token, owner, repo, ver string) (int64, string, error) {
-	existing, err := githubRequest("GET",
-		fmt.Sprintf("/repos/%s/%s/releases/tags/v%s", owner, repo, ver),
-		token, nil,
-	)
-	if err == nil {
-		var result struct {
-			ID        int64  `json:"id"`
-			UploadURL string `json:"upload_url"`
-		}
-		if json.Unmarshal(existing, &result) == nil && result.ID != 0 {
-			return result.ID, strings.Split(result.UploadURL, "{")[0], nil
-		}
-	}
-
-	payload := map[string]interface{}{
-		"tag_name": "v" + ver,
-		"name":     "v" + ver,
-		"draft":    false,
-	}
-	body, err := githubRequest("POST",
-		fmt.Sprintf("/repos/%s/%s/releases", owner, repo),
-		token, payload,
-	)
-	if err != nil {
-		return 0, "", err
-	}
-	var result struct {
-		ID        int64  `json:"id"`
-		UploadURL string `json:"upload_url"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return 0, "", err
-	}
-	return result.ID, strings.Split(result.UploadURL, "{")[0], nil
 }
 
 func uploadReleaseAsset(token, uploadURL, path string) error {
