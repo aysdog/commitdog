@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -88,6 +90,10 @@ func createGitHubReleaseWithBody(token, owner, repo, ver, body string) (int64, s
 			UploadURL string `json:"upload_url"`
 		}
 		if json.Unmarshal(existing, &result) == nil && result.ID != 0 {
+			githubRequest("PATCH",
+				fmt.Sprintf("/repos/%s/%s/releases/%d", owner, repo, result.ID),
+				token, map[string]interface{}{"body": body},
+			)
 			return result.ID, strings.Split(result.UploadURL, "{")[0], nil
 		}
 	}
@@ -117,27 +123,16 @@ func createGitHubReleaseWithBody(token, owner, repo, ver, body string) (int64, s
 }
 
 func fileSHA256(path string) string {
-	cmd := exec.Command("sha256sum", path)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		cmd2 := exec.Command("shasum", "-a", "256", path)
-		var out2 bytes.Buffer
-		cmd2.Stdout = &out2
-		if err2 := cmd2.Run(); err2 != nil {
-			return ""
-		}
-		parts := strings.Fields(strings.TrimSpace(out2.String()))
-		if len(parts) > 0 {
-			return parts[0]
-		}
+	f, err := os.Open(path)
+	if err != nil {
 		return ""
 	}
-	parts := strings.Fields(strings.TrimSpace(out.String()))
-	if len(parts) > 0 {
-		return parts[0]
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
 	}
-	return ""
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 func runInitCI() {
