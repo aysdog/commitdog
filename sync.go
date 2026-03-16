@@ -32,6 +32,10 @@ func runSync() {
 	fmt.Printf("  fetching...")
 	if err := gitFetch(remote); err != nil {
 		fmt.Println()
+		r := detectAndRecover(err.Error())
+		if r != nil && offerRecovery(r) {
+			return
+		}
 		fatal("fetch failed: %v", err)
 	}
 	fmt.Println(" done")
@@ -40,16 +44,12 @@ func runSync() {
 	pulled, err := gitPullRebase(remote, branch)
 	if err != nil {
 		fmt.Println()
-		if isRebaseConflict(err) {
-			fmt.Printf("\n  %s pull has conflicts — resolve them:\n", colorRed("✗"))
-			fmt.Println()
-			fmt.Println("    1. fix conflicting files")
-			fmt.Println("    2. git add .")
-			fmt.Println("    3. git rebase --continue")
-			fmt.Println()
-			fmt.Println("  or to cancel: git rebase --abort")
-			fmt.Println()
-			os.Exit(1)
+		r := detectAndRecover(err.Error())
+		if r != nil {
+			if offerRecovery(r) {
+				return
+			}
+			fatal("sync failed: %s — %s", r.message, r.hint)
 		}
 		if isNothingToPull(err) {
 			fmt.Println(" already up to date")
@@ -76,13 +76,20 @@ func runSync() {
 		if isNothingToPush(pushErr) {
 			fmt.Println(" nothing to push")
 		} else {
+			r := detectAndRecover(pushErr.Error())
+			if r != nil {
+				if offerRecovery(r) {
+					return
+				}
+				fatal("push failed: %s — %s", r.message, r.hint)
+			}
 			fatal("push failed: %v", pushErr)
 		}
 	} else {
 		fmt.Println(" done")
 	}
 
-	fmt.Printf("\n  ✓ %s/%s is in sync\n\n", remote, branch)
+	fmt.Printf("\n  %s %s/%s is in sync\n\n", colorGreen("✓"), remote, branch)
 }
 
 func gitFetch(remote string) error {
@@ -112,13 +119,6 @@ func gitPullRebase(remote, branch string) (string, error) {
 		return "", fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String() + stderr.String(), nil
-}
-
-func isRebaseConflict(err error) bool {
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "conflict") ||
-		strings.Contains(msg, "rebase") ||
-		strings.Contains(msg, "merge conflict")
 }
 
 func isNothingToPush(err error) bool {

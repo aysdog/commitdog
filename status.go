@@ -17,7 +17,6 @@ const (
 	sYellow = "\033[38;2;255;200;0m"
 	sRed    = "\033[38;2;255;60;60m"
 	sCyan   = "\033[38;2;100;200;255m"
-	sGray   = "\033[38;2;140;140;140m"
 	sBox    = "\033[38;2;70;70;80m"
 )
 
@@ -173,11 +172,6 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return string(runes[:max-1]) + "…"
-}
-
-func dotLine(color, hash, msg string, maxMsg int) string {
-	msg = truncate(msg, maxMsg)
-	return color + "● " + sReset + sDim + hash + sReset + " " + msg
 }
 
 func renderCommitsBox(commits []statusCommit, w, h int) []string {

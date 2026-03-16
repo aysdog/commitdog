@@ -10,7 +10,7 @@ const version = "0.2.2"
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "--version", "-v":
+		case "version", "-v":
 			printAsciiArt()
 			os.Exit(0)
 		case "--help", "-h":
@@ -39,6 +39,9 @@ func main() {
 			os.Exit(0)
 		case "merge":
 			runMerge()
+			os.Exit(0)
+		case "status":
+			runStatus()
 			os.Exit(0)
 		case "sync":
 			runSync()
@@ -127,6 +130,10 @@ func runCommitFlow(files []string) {
 
 	suggestions := generateSuggestions(a)
 
+	if !checkSecretsInDiff(diff) {
+		os.Exit(1)
+	}
+
 	chosen := pickSuggestion(suggestions)
 	if chosen == "" {
 		fmt.Println("  aborted.")
@@ -167,6 +174,8 @@ usage:
 
   commitdog pr              on feature branch: create PR with diff preview
                             on main: list open PRs, view diff, merge, close
+
+  commitdog status          project dashboard — commits, PRs, branches, version
 
   commitdog sync            fetch + pull rebase + push in one command
 
