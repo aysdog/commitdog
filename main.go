@@ -234,4 +234,3 @@ func fatal(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "\n  commitdog: "+format+"\n\n", args...)
 	os.Exit(1)
 }
-// fix checksums and release body
