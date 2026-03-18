@@ -114,7 +114,6 @@ func isHTTPSAuthError(msg string) bool {
 }
 
 func tryFixHTTPSRemote(remote, branch string) error {
-	// get current remote URL
 	cmd := exec.Command("git", "remote", "get-url", remote)
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -127,7 +126,6 @@ func tryFixHTTPSRemote(remote, branch string) error {
 		return fmt.Errorf("push failed: authentication error")
 	}
 
-	// convert https://github.com/user/repo.git → git@github.com:user/repo.git
 	sshURL := strings.Replace(currentURL, "https://github.com/", "git@github.com:", 1)
 
 	fmt.Println()
@@ -143,7 +141,6 @@ func tryFixHTTPSRemote(remote, branch string) error {
 		return fmt.Errorf("push aborted")
 	}
 
-	// switch remote to SSH
 	setCmd := exec.Command("git", "remote", "set-url", remote, sshURL)
 	var stderr bytes.Buffer
 	setCmd.Stderr = &stderr
@@ -154,7 +151,6 @@ func tryFixHTTPSRemote(remote, branch string) error {
 	fmt.Printf("  ✓ remote switched to SSH\n")
 	fmt.Printf("  retrying push...\n")
 
-	// retry push
 	pushCmd := exec.Command("git", "push", remote, branch)
 	var pushStderr bytes.Buffer
 	pushCmd.Stderr = &pushStderr
