@@ -385,12 +385,10 @@ func statusIssues() []statusIssue {
 func statusRepoName() string {
 	out := strings.TrimSpace(gitOut("remote", "get-url", "origin"))
 	out = strings.TrimSuffix(out, ".git")
-	// SSH: git@github.com:user/repo
 	if strings.Contains(out, ":") && !strings.Contains(out, "//") {
 		parts := strings.SplitN(out, ":", 2)
 		return parts[1]
 	}
-	// HTTPS: https://github.com/user/repo
 	parts := strings.Split(out, "/")
 	if len(parts) >= 2 {
 		return parts[len(parts)-2] + "/" + parts[len(parts)-1]
