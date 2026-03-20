@@ -42,6 +42,24 @@ func getGitHubUsername(token string) (string, error) {
 	return u.Login, nil
 }
 
+func getGitHubOrgs(token string) ([]string, error) {
+	body, err := githubRequest("GET", "/user/orgs", token, nil)
+	if err != nil {
+		return nil, err
+	}
+	var orgs []struct {
+		Login string `json:"login"`
+	}
+	if err := json.Unmarshal(body, &orgs); err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, o := range orgs {
+		names = append(names, o.Login)
+	}
+	return names, nil
+}
+
 func createPersonalRepo(token, name string, private bool) (repoResponse, error) {
 	payload := createRepoRequest{
 		Name:     name,

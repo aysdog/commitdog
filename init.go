@@ -25,37 +25,42 @@ func runInit() {
 	}
 	fmt.Printf("\n  ✓ connected as %s\n\n", username)
 
-	fmt.Printf("  push to personal or org? [P/o] › ")
-	var isOrg bool
-	var orgName string
+	orgs, _ := getGitHubOrgs(c.Token)
 
-	for {
-		input := strings.ToLower(sanitizeInput(readLine()))
-		if input == "" || input == "p" {
-			isOrg = false
-			break
-		}
-		if input == "o" {
-			isOrg = true
-			break
-		}
-		fmt.Printf("  P or o › ")
+	destinations := []string{username + " (personal)"}
+	for _, o := range orgs {
+		destinations = append(destinations, o)
 	}
 
-	if isOrg {
-		fmt.Printf("  org name › ")
+	var owner string
+	if len(destinations) == 1 {
+		owner = username
+		fmt.Printf("  creating under %s\n\n", username)
+	} else {
+		fmt.Println("  where to create the repo?")
+		for i, d := range destinations {
+			fmt.Printf("  %d  %s\n", i+1, d)
+		}
+		fmt.Println()
+		fmt.Printf("  [1-%d] pick › ", len(destinations))
 		for {
-			input := sanitizeInput(readLine())
-			if input == "" {
-				fmt.Printf("  org name cannot be empty › ")
-				continue
+			input := strings.TrimSpace(readLine())
+			idx := 0
+			for _, r := range input {
+				if r >= '1' && r <= '9' {
+					idx = int(r-'0') - 1
+					break
+				}
 			}
-			if !isSafeGitRef(input) {
-				fmt.Printf("  invalid org name › ")
-				continue
+			if idx >= 0 && idx < len(destinations) {
+				if idx == 0 {
+					owner = username
+				} else {
+					owner = orgs[idx-1]
+				}
+				break
 			}
-			orgName = input
-			break
+			fmt.Printf("  [1-%d] pick › ", len(destinations))
 		}
 	}
 
@@ -87,14 +92,21 @@ func runInit() {
 	fmt.Printf("\n  creating repo...")
 	var repo repoResponse
 
-	if isOrg {
-		repo, err = createOrgRepo(c.Token, orgName, repoName, private)
-	} else {
+	if owner == username {
 		repo, err = createPersonalRepo(c.Token, repoName, private)
+	} else {
+		repo, err = createOrgRepo(c.Token, owner, repoName, private)
 	}
 
 	if err != nil {
 		fmt.Println()
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "Repository creation failed") {
+			fatal("failed to create repo: check that your token has 'write:org' scope for org repos.\n  get a new token at https://github.com/settings/tokens")
+		}
+		if strings.Contains(errMsg, "already exists") {
+			fatal("repo %s/%s already exists on GitHub.", owner, repoName)
+		}
 		fatal("failed to create repo: %v", err)
 	}
 	fmt.Printf("\n  ✓ repo created: %s\n\n", repo.HTMLURL)
