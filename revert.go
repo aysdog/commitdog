@@ -26,6 +26,29 @@ func runRevert() {
 		return
 	}
 
+	if isDirtyWorkingTree() {
+		fmt.Println()
+		fmt.Printf("  you have unstaged changes. stash them first? [Y/n] › ")
+		input := strings.ToLower(strings.TrimSpace(readLine()))
+		if input == "n" || input == "no" {
+			fmt.Println("  aborted.")
+			fmt.Println()
+			return
+		}
+		if err := exec.Command("git", "stash", "push", "-m", "commitdog-revert-stash").Run(); err != nil {
+			fatal("stash failed: %v", err)
+		}
+		fmt.Println("  ✓ stashed. will pop after revert.")
+		defer func() {
+			fmt.Printf("  popping stash...")
+			if err := exec.Command("git", "stash", "pop").Run(); err != nil {
+				fmt.Printf("\n  could not pop stash — run 'git stash pop' manually\n")
+			} else {
+				fmt.Println(" done")
+			}
+		}()
+	}
+
 	commits, err := getRecentCommits(5)
 	if err != nil {
 		fatal("could not read git log: %v", err)
@@ -329,6 +352,7 @@ func isMergeCommit(hash string) bool {
 }
 
 func getMergeParentBranches(hash string) (parent1, parent2 string) {
+	// get short hashes of both parents
 	cmd1 := exec.Command("git", "rev-parse", "--short", hash+"^1")
 	cmd1.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
 	var out1 bytes.Buffer
@@ -343,12 +367,14 @@ func getMergeParentBranches(hash string) (parent1, parent2 string) {
 	cmd2.Run()
 	p2 := strings.TrimSpace(out2.String())
 
+	// try to resolve parent hashes to branch names
 	parent1 = resolveBranchName(p1)
 	parent2 = resolveBranchName(p2)
 	return
 }
 
 func resolveBranchName(hash string) string {
+	// try to find a branch pointing to this commit
 	cmd := exec.Command("git", "branch", "--all", "--format=%(refname:short)", "--points-at", hash)
 	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
 	var out bytes.Buffer
@@ -356,6 +382,7 @@ func resolveBranchName(hash string) string {
 	if err := cmd.Run(); err != nil || strings.TrimSpace(out.String()) == "" {
 		return hash
 	}
+	// return first branch name found, prefer local over remote
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	for _, l := range lines {
 		l = strings.TrimSpace(l)

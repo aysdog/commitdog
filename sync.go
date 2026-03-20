@@ -13,6 +13,29 @@ func runSync() {
 		fatal("not a git repository.")
 	}
 
+	if isDirtyWorkingTree() {
+		fmt.Println()
+		fmt.Printf("  you have unstaged changes. stash them first? [Y/n] › ")
+		input := strings.ToLower(strings.TrimSpace(readLine()))
+		if input == "n" || input == "no" {
+			fmt.Println("  aborted.")
+			fmt.Println()
+			return
+		}
+		if err := exec.Command("git", "stash", "push", "-m", "commitdog-sync-stash").Run(); err != nil {
+			fatal("stash failed: %v", err)
+		}
+		fmt.Println("  ✓ stashed. will pop after sync.")
+		defer func() {
+			fmt.Printf("  popping stash...")
+			if err := exec.Command("git", "stash", "pop").Run(); err != nil {
+				fmt.Printf("\n  could not pop stash — run 'git stash pop' manually\n")
+			} else {
+				fmt.Println(" done")
+			}
+		}()
+	}
+
 	remotes := getRemotes()
 	if len(remotes) == 0 {
 		fatal("no remote configured. run 'commitdog init' first.")

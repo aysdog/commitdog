@@ -9,10 +9,10 @@ import (
 )
 
 type diffFile struct {
-	name    string
-	adds    int
-	dels    int
-	hunks   []string
+	name  string
+	adds  int
+	dels  int
+	hunks []string
 }
 
 func getDiffFiles(base, head string) ([]diffFile, error) {
@@ -57,19 +57,44 @@ func countPlusMinus(s string) (int, int) {
 }
 
 func getFileDiff(base, head, filename string) []string {
-	args := []string{"diff", "--no-color", "-U5"}
+	tryRefs := []string{base + "..." + head}
 	if base != "" && head != "" {
-		args = append(args, base+"..."+head)
-	} else {
-		args = append(args, "HEAD")
+		tryRefs = append(tryRefs, "origin/"+base+"..."+"origin/"+head)
+		tryRefs = append(tryRefs, base+"...origin/"+head)
 	}
-	args = append(args, "--", filename)
+
+	for _, ref := range tryRefs {
+		args := []string{"diff", "--no-color", "-U5", ref, "--", filename}
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(os.Environ(), "GIT_PAGER=cat")
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		if err := cmd.Run(); err != nil {
+			continue
+		}
+		raw := out.String()
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		var lines []string
+		for _, l := range strings.Split(raw, "\n") {
+			if strings.HasPrefix(l, "diff --git") ||
+				strings.HasPrefix(l, "index ") ||
+				strings.HasPrefix(l, "--- ") ||
+				strings.HasPrefix(l, "+++ ") {
+				continue
+			}
+			lines = append(lines, l)
+		}
+		return lines
+	}
+
+	args := []string{"diff", "--no-color", "-U5", "HEAD", "--", filename}
 	cmd := exec.Command("git", args...)
 	cmd.Env = append(os.Environ(), "GIT_PAGER=cat")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Run()
-
 	var lines []string
 	for _, l := range strings.Split(out.String(), "\n") {
 		if strings.HasPrefix(l, "diff --git") ||

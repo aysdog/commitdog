@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const version = "0.2.5"
+const version = "0.2.2"
 
 func main() {
 	if len(os.Args) > 1 {
@@ -39,6 +39,9 @@ func main() {
 			os.Exit(0)
 		case "merge":
 			runMerge()
+			os.Exit(0)
+		case "secrets":
+			runSecretsHistoryScan()
 			os.Exit(0)
 		case "status":
 			runStatus()
@@ -180,6 +183,8 @@ usage:
 
   commitdog pr              on feature branch: create PR with diff preview
                             on main: list open PRs, view diff, merge, close
+
+  commitdog secrets          scan full commit history for leaked secrets
 
   commitdog status          project dashboard — commits, PRs, branches, version
 
