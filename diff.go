@@ -173,7 +173,7 @@ func runDiffViewer(files []diffFile, base, head string) bool {
 		}
 
 		fmt.Println()
-		fmt.Println("  \033[90m[↑/↓] navigate  [enter] view diff  [c] create PR  [q] quit\033[0m")
+		fmt.Println("  \033[90m[j/k/↑/↓] navigate  [d] view diff  [c] create PR  [q] quit\033[0m")
 
 		b := make([]byte, 3)
 		n, _ := os.Stdin.Read(b)
@@ -188,19 +188,19 @@ func runDiffViewer(files []diffFile, base, head string) bool {
 		case b[0] == 'c':
 			clearScreen()
 			return true
-		case b[0] == 13:
+		case b[0] == 'd':
 			disableRawMode()
 			clearScreen()
 			runInlineDiff(files[selected], base, head)
 			enableRawMode()
-		case b[0] == 'k' || (n == 3 && b[0] == 27 && b[1] == 91 && b[2] == 65):
+		case isUpKey(b, n):
 			if selected > 0 {
 				selected--
 				if selected < offset {
 					offset--
 				}
 			}
-		case b[0] == 'j' || (n == 3 && b[0] == 27 && b[1] == 91 && b[2] == 66):
+		case isDownKey(b, n):
 			if selected < len(files)-1 {
 				selected++
 				if selected >= offset+visibleH {
@@ -262,11 +262,11 @@ func runInlineDiff(f diffFile, base, head string) {
 		case b[0] == 'q':
 			clearScreen()
 			return
-		case b[0] == 'j' || (n == 3 && b[0] == 27 && b[1] == 91 && b[2] == 66):
+		case isDownKey(b, n):
 			if offset < maxOffset {
 				offset++
 			}
-		case b[0] == 'k' || (n == 3 && b[0] == 27 && b[1] == 91 && b[2] == 65):
+		case isUpKey(b, n):
 			if offset > 0 {
 				offset--
 			}

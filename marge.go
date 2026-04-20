@@ -117,7 +117,7 @@ func doMerge(s mergeBranch, into string) {
 		}
 	}
 
-	fmt.Printf("  [1] merge   [2] cancel › ")
+	fmt.Printf("  [1] merge   [2] view diff   [3] cancel › ")
 	for {
 		input := readLine()
 		switch input {
@@ -131,11 +131,14 @@ func doMerge(s mergeBranch, into string) {
 			fmt.Printf("  ✓ merged %s into %s\n", s.name, into)
 			askPush()
 			return
-		case "2", "q":
+		case "2":
+			showMergeDiff(s.name, into)
+			fmt.Printf("  [1] merge   [2] view diff   [3] cancel › ")
+		case "3", "q":
 			fmt.Println("  aborted.")
 			return
 		default:
-			fmt.Printf("  1 or 2 › ")
+			fmt.Printf("  1, 2, or 3 › ")
 		}
 	}
 }
@@ -362,4 +365,55 @@ func openInEditor(file string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Run()
+}
+
+func showMergeDiff(branch, base string) {
+	ref := base + "..." + branch
+	cmd := exec.Command("git", "diff", "--no-color", ref)
+	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		fmt.Println("  could not get diff.")
+		return
+	}
+	lines := strings.Split(out.String(), "\n")
+	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
+		fmt.Println("  no diff found.")
+		return
+	}
+	fmt.Println()
+	pageSize := 40
+	start := 0
+	for {
+		end := start + pageSize
+		if end > len(lines) {
+			end = len(lines)
+		}
+		for _, l := range lines[start:end] {
+			switch {
+			case strings.HasPrefix(l, "+") && !strings.HasPrefix(l, "+++"):
+				fmt.Println("  " + colorGreen(l))
+			case strings.HasPrefix(l, "-") && !strings.HasPrefix(l, "---"):
+				fmt.Println("  " + colorRed(l))
+			case strings.HasPrefix(l, "@@"):
+				fmt.Println("  " + colorMuted(l))
+			default:
+				fmt.Println("  " + l)
+			}
+		}
+		if end >= len(lines) {
+			fmt.Println()
+			fmt.Printf("  [enter] back › ")
+			readLine()
+			break
+		}
+		start = end
+		fmt.Printf("  [enter] more   [q] back › ")
+		input := readLine()
+		if input == "q" {
+			fmt.Println()
+			break
+		}
+	}
 }

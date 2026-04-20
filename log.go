@@ -449,11 +449,11 @@ func runLogViewer(lines []string, showAll bool, total int) {
 		case b[0] == 'q':
 			clearScreen()
 			return
-		case b[0] == 'j' || (n == 3 && b[0] == 27 && b[1] == 91 && b[2] == 66):
+		case isDownKey(b, n):
 			if offset < maxOffset {
 				offset++
 			}
-		case b[0] == 'k' || (n == 3 && b[0] == 27 && b[1] == 91 && b[2] == 65):
+		case isUpKey(b, n):
 			if offset > 0 {
 				offset--
 			}

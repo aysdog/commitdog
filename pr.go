@@ -9,10 +9,10 @@ import (
 )
 
 type prEntry struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
 	HTMLURL string `json:"html_url"`
-	Head   struct {
+	Head    struct {
 		Ref string `json:"ref"`
 	} `json:"head"`
 	Base struct {
@@ -135,6 +135,14 @@ func runPRCreate(token, branch, base string) {
 	fmt.Println()
 }
 
+func isUpKey(b []byte, n int) bool {
+	return b[0] == 'k' || (n == 3 && b[0] == 27 && b[1] == 91 && b[2] == 65)
+}
+
+func isDownKey(b []byte, n int) bool {
+	return b[0] == 'j' || (n == 3 && b[0] == 27 && b[1] == 91 && b[2] == 66)
+}
+
 func runPRList(token string) {
 	owner, repo := getRepoOwnerAndName()
 	if owner == "" || repo == "" {
@@ -198,7 +206,7 @@ func runPRList(token string) {
 		}
 
 		fmt.Println()
-		fmt.Println("  \033[90m[↑/↓] navigate  [enter] view  [m] merge  [q] quit\033[0m")
+		fmt.Println("  \033[90m[j/k/↑/↓] navigate  [d] view diff  [m] merge  [q] quit\033[0m")
 
 		b := make([]byte, 3)
 		n, _ := os.Stdin.Read(b)
@@ -215,22 +223,22 @@ func runPRList(token string) {
 			clearScreen()
 			runPRMerge(token, owner, repo, prs[selected])
 			return
-		case b[0] == 13:
+		case b[0] == 'd':
 			disableRawMode()
 			clearScreen()
 			files, _ := getDiffFiles(prs[selected].Base.Ref, prs[selected].Head.Ref)
 			if len(files) > 0 {
-				runDiffViewerReview(files, prs[selected].Base.Ref, prs[selected].Head.Ref, token, owner, repo, prs[selected])
+				runDiffViewerReview(files, prs[selected].Base.Ref, prs[selected].Head.Ref)
 			}
 			enableRawMode()
-		case b[0] == 'k' || (n == 3 && b[0] == 27 && b[1] == 91 && b[2] == 65):
+		case isUpKey(b, n):
 			if selected > 0 {
 				selected--
 				if selected < offset {
 					offset--
 				}
 			}
-		case b[0] == 'j' || (n == 3 && b[0] == 27 && b[1] == 91 && b[2] == 66):
+		case isDownKey(b, n):
 			if selected < len(prs)-1 {
 				selected++
 				if selected >= offset+visibleH {
@@ -241,7 +249,7 @@ func runPRList(token string) {
 	}
 }
 
-func runDiffViewerReview(files []diffFile, base, head, token, owner, repo string, pr prEntry) {
+func runDiffViewerReview(files []diffFile, base, head string) {
 	selected := 0
 	termH := terminalHeight()
 	visibleH := termH - 10
@@ -263,8 +271,6 @@ func runDiffViewerReview(files []diffFile, base, head, token, owner, repo string
 			totalDels += f.dels
 		}
 
-		fmt.Printf("  \033[1mPR #%d\033[0m — %s\n", pr.Number, pr.Title)
-		fmt.Printf("  \033[36m%s\033[0m → \033[36m%s\033[0m  ·  \033[90m@%s\033[0m\n\n", head, base, pr.User.Login)
 		fmt.Printf("  \033[1m%d files changed\033[0m  \033[32m+%d\033[0m  \033[31m-%d\033[0m\n\n", len(files), totalAdds, totalDels)
 
 		end := offset + visibleH
@@ -288,7 +294,7 @@ func runDiffViewerReview(files []diffFile, base, head, token, owner, repo string
 		}
 
 		fmt.Println()
-		fmt.Println("  \033[90m[↑/↓] navigate  [enter] view diff  [m] merge  [c] close PR  [q] back\033[0m")
+		fmt.Println("  \033[90m[j/k/↑/↓] navigate  [d] view diff  [q] back\033[0m")
 
 		b := make([]byte, 3)
 		n, _ := os.Stdin.Read(b)
@@ -300,29 +306,19 @@ func runDiffViewerReview(files []diffFile, base, head, token, owner, repo string
 		case b[0] == 'q':
 			clearScreen()
 			return
-		case b[0] == 'm':
-			disableRawMode()
-			clearScreen()
-			runPRMerge(token, owner, repo, pr)
-			return
-		case b[0] == 'c':
-			disableRawMode()
-			clearScreen()
-			closePR(token, owner, repo, pr.Number)
-			return
-		case b[0] == 13:
+		case b[0] == 'd':
 			disableRawMode()
 			clearScreen()
 			runInlineDiff(files[selected], base, head)
 			enableRawMode()
-		case b[0] == 'k' || (n == 3 && b[0] == 27 && b[1] == 91 && b[2] == 65):
+		case isUpKey(b, n):
 			if selected > 0 {
 				selected--
 				if selected < offset {
 					offset--
 				}
 			}
-		case b[0] == 'j' || (n == 3 && b[0] == 27 && b[1] == 91 && b[2] == 66):
+		case isDownKey(b, n):
 			if selected < len(files)-1 {
 				selected++
 				if selected >= offset+visibleH {
@@ -391,23 +387,6 @@ func runPRMerge(token, owner, repo string, pr prEntry) {
 	exec.Command("git", "checkout", pr.Base.Ref).Run()
 	exec.Command("git", "pull", "--rebase").Run()
 	fmt.Printf("  \033[32m✓\033[0m up to date\n\n")
-}
-
-func closePR(token, owner, repo string, number int) {
-	fmt.Printf("  close PR #%d? [y/N] › ", number)
-	if ans := readLine(); ans != "y" && ans != "yes" {
-		fmt.Println("  aborted.")
-		return
-	}
-	payload := map[string]string{"state": "closed"}
-	_, err := githubRequest("PATCH",
-		fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, number),
-		token, payload,
-	)
-	if err != nil {
-		fatal("could not close PR: %v", err)
-	}
-	fmt.Printf("  \033[32m✓\033[0m PR #%d closed\n\n", number)
 }
 
 func getRepoOwnerAndName() (string, string) {
