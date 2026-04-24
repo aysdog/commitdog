@@ -5,71 +5,57 @@ package main
 
 import (
 	"fmt"
-	"strings"
 )
 
 var asciiLines = []string{
-	`00000000            00000000  `,
-	`0000000000000000000000000000  `,
-	`000  000000000000000000  000  `,
-	`000000000          000000000  `,
-	`0000000              0000000  `,
-	` 0000   00       0000  0000   `,
-	`0000   0000      00000  0000  `,
-	`0000   0000      0000   0000  `,
-	` 000                    0000  `,
-	` 0000      000000      0000   `,
-	` 0000     00000000     0000   `,
-	`  0000     000000     0000    `,
-	`   0000     0000     0000     `,
-	`    00000000000000000000      `,
-	`      0000000000000000        `,
-	`                              `,
+	`                              ▄▄             `,
+	`                              ▀▀  ██      ██             `,
+	`▄████ ▄███▄ ███▄███▄ ███▄███▄ ██ ▀██▀▀ ▄████ ▄███▄ ▄████ `,
+	`██    ██ ██ ██ ██ ██ ██ ██ ██ ██  ██   ██ ██ ██ ██ ██ ██ `,
+	`▀████ ▀███▀ ██ ██ ██ ██ ██ ██ ██▄ ██   ▀████ ▀███▀ ▀████ `,
+	`                                                      ██ `,
+	`                                                    ▀▀▀  `,
 }
-
-const artWidth = 30
 
 func printAsciiArt() {
 	yellow := "\033[33m"
-	cyan := "\033[36m"
 	bold := "\033[1m"
 	dim := "\033[90m"
 	reset := "\033[0m"
 
-	info := []string{
-		bold + cyan + "commitdog" + reset + dim + " v" + version + reset,
-		dim + "─────────────────────────────────" + reset,
-		"zero-bs commits · no AI · no telemetry",
-		"",
-		cyan + "commitdog" + reset + "              stage · commit · push",
-		cyan + "commitdog init" + reset + "         create repo · first push",
-		cyan + "commitdog log" + reset + "          colored branch graph",
-		cyan + "commitdog branch" + reset + "       branch management",
-		cyan + "commitdog merge" + reset + "        merge with preview",
-		cyan + "commitdog sync" + reset + "         pull · rebase · push",
-		cyan + "commitdog stash" + reset + "        save work in progress",
-		cyan + "commitdog revert" + reset + "       undo a commit",
-		cyan + "commitdog setup" + reset + "        configure github token",
-		"",
-		dim + "aysdog.com" + reset,
-		"",
-	}
-
-	gap := "    "
 	margin := "  "
-	for i, line := range asciiLines {
-		art := yellow + margin + line + reset
-		if i < len(info) {
-			fmt.Printf("%s%s%s\n", art, gap, info[i])
-		} else {
-			fmt.Printf("%s\n", art)
-		}
+	for _, line := range asciiLines {
+		fmt.Printf("%s%s%s\n", yellow, margin, line+reset)
 	}
 
-	if len(info) > len(asciiLines) {
-		padding := strings.Repeat(" ", artWidth+len(margin))
-		for i := len(asciiLines); i < len(info); i++ {
-			fmt.Printf("%s%s%s\n", padding, gap, info[i])
-		}
+	fmt.Println()
+	fmt.Println("  " + bold + yellow + "commitdog" + reset + dim + " v" + version + reset)
+	fmt.Println("  " + dim + "─────────────────────────────────" + reset)
+	fmt.Println("  zero-bs commits · no AI · no telemetry")
+	fmt.Println()
+	fmt.Println(dim + "  git, but make it not painful." + reset)
+	fmt.Println()
+
+	cmds := [][]string{
+		{"commitdog", "stage · commit · push"},
+		{"commitdog init", "create repo · first push"},
+		{"commitdog log", "colored branch graph"},
+		{"commitdog branch", "branch management"},
+		{"commitdog switch", "switch branches fast"},
+		{"commitdog merge", "merge with diff preview"},
+		{"commitdog pr", "create · review · merge PRs"},
+		{"commitdog sync", "pull · rebase · push"},
+		{"commitdog stash", "save work in progress"},
+		{"commitdog revert", "undo a commit"},
+		{"commitdog release", "version bump · build · publish"},
+		{"commitdog setup", "configure github token"},
 	}
+
+	for _, c := range cmds {
+		fmt.Printf("  %s%-22s%s  %s\n", yellow, c[0], reset, c[1])
+	}
+
+	fmt.Println()
+	fmt.Println(dim + "  https://commitdog.aysdog.com" + reset)
+	fmt.Println()
 }
