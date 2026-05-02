@@ -2,15 +2,13 @@
 
 # commitdog
 
-![license](https://img.shields.io/badge/license-MIT-brightgreen?style=flat-square) ![go](https://img.shields.io/badge/go-1.21%2B-00ADD8?style=flat-square&logo=go&logoColor=white) ![platform](https://img.shields.io/badge/platform-linux%20%7C%20macOS%20%7C%20windows-lightgrey?style=flat-square) ![telemetry](https://img.shields.io/badge/telemetry-none-4ade80?style=flat-square) ![part of](https://img.shields.io/badge/part%20of-aysdog-orange?style=flat-square)
+![license](https://img.shields.io/badge/license-MIT-brightgreen?style=flat-square) ![go](https://img.shields.io/badge/go-1.22%2B-00ADD8?style=flat-square&logo=go&logoColor=white) ![platform](https://img.shields.io/badge/platform-linux%20%7C%20macOS%20%7C%20windows-lightgrey?style=flat-square) ![telemetry](https://img.shields.io/badge/telemetry-none-4ade80?style=flat-square) ![part of](https://img.shields.io/badge/part%20of-aysdog-orange?style=flat-square)
 
 git workflow CLI. zero dependencies. single binary.
 
 commit messages, branch management, sync, log, PR, release — all from one tool. pure Go stdlib. no AI. no telemetry.
 
 ---
-
-## star history
 
 [![Star History Chart](https://api.star-history.com/svg?repos=aysdog/commitdog&type=Date)](https://star-history.com/#aysdog/commitdog&Date)
 
@@ -40,11 +38,6 @@ yay -S commitdog-bin
 irm https://aysdog.com/install-commitdog.ps1 | iex
 ```
 
-**Windows (winget)**
-```sh
-winget install aysdog.commitdog
-```
-
 ---
 
 ## setup
@@ -55,7 +48,7 @@ run once to save your GitHub email and a classic PAT:
 commitdog setup
 ```
 
-stored at `~/.config/commitdog/config.toml` with 0600 permissions. never leaves your machine except when calling the GitHub API.
+stored at `~/.config/commitdog/config.toml` with `0600` permissions. never leaves your machine except when calling the GitHub API.
 
 you need a **classic** Personal Access Token with `repo`, `write:org`, and `read:user` scopes. get one at [github.com/settings/tokens](https://github.com/settings/tokens).
 
@@ -67,22 +60,23 @@ you need a **classic** Personal Access Token with `repo`, `write:org`, and `read
 |---------|-------------|
 | `commitdog` | stage all, suggest 4 commit messages, pick, commit, push |
 | `commitdog <file>` | stage a specific file only |
+| `commitdog init` | create GitHub repo, git init, first commit, first push |
+| `commitdog setup` | save GitHub email and PAT |
 | `commitdog log` | interactive git log with colored branch graph |
-| `commitdog pr` | create PR on feature branch · list/review/merge PRs on main |
-| `commitdog release` | bump version, build 5 binaries, changelog, tag, push, GitHub release + checksums |
-| `commitdog release --changelog-only` | preview grouped changelog since last tag |
-| `commitdog release --init-ci` | generate .github/workflows/release.yml |
-| `commitdog status` | project dashboard — commits, PRs, branches, version, issues |
 | `commitdog branch` | interactive branch menu |
 | `commitdog switch` | jump to branch switcher |
 | `commitdog branch create` | create new branch with optional base |
 | `commitdog branch delete` | delete branch locally + optionally remote |
 | `commitdog merge` | merge a branch into current with diff preview |
+| `commitdog pr` | create PR on feature branch · list/review/merge PRs on main |
 | `commitdog sync` | fetch + pull rebase + push — auto-recovers on errors |
 | `commitdog stash` | save, pop, or drop stashes interactively |
 | `commitdog revert` | pick from last 5 commits and revert |
-| `commitdog init` | create GitHub repo, git init, first commit, first push |
-| `commitdog setup` | save GitHub email and PAT |
+| `commitdog release` | bump version, build 5 binaries, changelog, tag, push, GitHub release + checksums |
+| `commitdog release config` | configure which platforms to build for |
+| `commitdog release --changelog-only` | preview grouped changelog since last tag |
+| `commitdog status` | project dashboard — commits, PRs, branches, version |
+| `commitdog secrets` | scan full commit history for leaked secrets |
 | `commitdog --update` | update to latest release |
 | `commitdog --version` | print version |
 
@@ -109,13 +103,13 @@ commitdog
   ✓ pushed to origin/main
 ```
 
-suggestions come from your actual diff — function names, file types, scope inference. no AI, no network call. pick `e` to open `$EDITOR` with the suggestion pre-filled.
+suggestions come from your actual diff — function names, file types, scope inference. no AI, no network call. pick `e` to edit before committing.
 
 ---
 
 ## secret detection
 
-before showing suggestions, commitdog silently scans your staged diff. if it finds a secret, it blocks and shows exactly where:
+before showing suggestions, commitdog silently scans your staged diff. if it finds a secret it blocks and shows exactly where:
 
 ```
   ✗ possible secret detected in staged changes:
@@ -157,9 +151,9 @@ commitdog release
 ```
 
 ```
-  detected: Go  ·  current version: v0.2.4
+  detected: Go  ·  current version: v0.2.6
 
-  1  patch  →  v0.2.5
+  1  patch  →  v0.2.7
   2  minor  →  v0.3.0
   3  major  →  v1.0.0
   4  custom
@@ -168,9 +162,9 @@ commitdog release
 
   changelog preview:
   ### Bug Fixes
-  - fix(changelog): native SHA256, clean release body
+  - fix(sync): handle missing upstream on first push
 
-  release v0.2.4 → v0.2.5? [y/n] › y
+  release v0.2.6 → v0.2.7? [y/n] › y
 
   bumping version in main.go...              ✓
   building linux/amd64...                    ✓
@@ -179,7 +173,7 @@ commitdog release
   building darwin/arm64...                   ✓
   building windows/amd64...                  ✓
   committing...                              ✓
-  tagging v0.2.5...                          ✓
+  tagging v0.2.7...                          ✓
   pushing...                                 ✓
   creating GitHub release...                 ✓
   uploading commitdog-linux-amd64...         ✓
@@ -189,13 +183,37 @@ commitdog release
   uploading commitdog-windows-amd64.exe...   ✓
   uploading checksums.txt...                 ✓
 
-  ✓ v0.2.5 released
-  https://github.com/aysdog/commitdog/releases/tag/v0.2.5
+  ✓ v0.2.7 released
+  https://github.com/aysdog/commitdog/releases/tag/v0.2.7
 ```
 
 every step registers an undo. if anything fails — network cut, GitHub API down, build error — commitdog rolls back every completed step in reverse. your repo is always left clean.
 
-**version drift detection** — if your version file says `v0.2.3` but the latest git tag is `v0.2.5`, commitdog warns before touching anything.
+**version drift detection** — if your version file says `v0.2.5` but the latest git tag is `v0.2.6`, commitdog warns before touching anything.
+
+---
+
+## release targets
+
+```sh
+commitdog release config
+```
+
+```
+  select build targets:
+
+  enter numbers separated by spaces, e.g. 1, 2, 3
+
+  1  linux/amd64        ✓
+  2  linux/arm64        ✓
+  3  darwin/amd64        
+  4  darwin/arm64        
+  5  windows/amd64       
+
+  [1-5] toggle, [a] all, [enter] confirm, [q] quit › 3, 4
+```
+
+saved to `.commitdog` in your repo root. re-run anytime to change. if you skip config, commitdog will ask once — choose defaults or configure manually.
 
 ---
 
@@ -215,8 +233,6 @@ on a feature branch — interactive diff viewer → create PR. on main — list 
 commitdog log
 ```
 
-![commitdog log](https://github.com/anirbanfaith/blog-images/blob/main/commitdog-log.png)
-
 each branch gets its own RGB color. `j`/`k` to scroll, `a` to show all commits, `q` to quit.
 
 ---
@@ -228,22 +244,6 @@ commitdog init
 ```
 
 creates a GitHub repo via API, runs `git init`, makes the first commit, sets the remote, and pushes — no browser needed.
-
----
-
-## version history
-
-| version | what shipped |
-|---------|-------------|
-| v0.2.5 | native Go SHA256 · clean release body · packagemanagers.go separated |
-| v0.2.4 | secret detection · atomic release rollback · detectAndRecover · version drift check · changelog.go |
-| v0.2.3 | initial rollback chain · sync hardened |
-| v0.2.2 | commitdog status · log graph · auto-changelog · SHA256 checksums · Homebrew + AUR automation |
-| v0.2.1 | Homebrew · AUR · winget · smart version init |
-| v0.2.0 | commitdog pr · commitdog release |
-| v0.1.9 | HTTPS→SSH auto-fix · merge commit revert |
-| v0.1.8 | commitdog log with branch graph |
-| v0.1.4 | branch / switch / merge / sync / stash / revert |
 
 ---
 
