@@ -197,6 +197,8 @@ usage:
   commitdog release         bump version, build, tag, push, create GitHub release
                             auto-detects Go / Node.js / Rust / Python / Java
 
+  commitdog release config    configure build targets
+
   commitdog --update        update to latest version
   commitdog --version       show version and logo
   commitdog --help          show this help

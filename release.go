@@ -186,16 +186,17 @@ func runRelease() {
 		fatal("not a git repository.")
 	}
 
-	if len(os.Args) > 2 && os.Args[2] == "--changelog-only" {
-		cl := buildChangelog(getLatestGitTag())
-		fmt.Println()
-		fmt.Println(cl)
-		return
-	}
-
-	if len(os.Args) > 2 && os.Args[2] == "--init-ci" {
-		runInitCI()
-		return
+	if len(os.Args) > 2 {
+		switch os.Args[2] {
+		case "--changelog-only":
+			cl := buildChangelog(getLatestGitTag())
+			fmt.Println()
+			fmt.Println(cl)
+			return
+		case "config":
+			runReleaseConfig()
+			return
+		}
 	}
 
 	cfg := loadConfig()
@@ -300,13 +301,7 @@ func runRelease() {
 	var binaries []string
 
 	if isGo {
-		targets := []struct{ goos, goarch, suffix string }{
-			{"linux", "amd64", ""},
-			{"linux", "arm64", ""},
-			{"darwin", "amd64", ""},
-			{"darwin", "arm64", ""},
-			{"windows", "amd64", ".exe"},
-		}
+		targets := ensureReleaseConfig()
 		for _, t := range targets {
 			name := fmt.Sprintf("%s-%s-%s%s", repo, t.goos, t.goarch, t.suffix)
 			label := fmt.Sprintf("building %s/%s...", t.goos, t.goarch)
