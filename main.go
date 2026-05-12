@@ -43,17 +43,11 @@ func main() {
 		case "secrets":
 			runSecretsHistoryScan()
 			os.Exit(0)
-		case "status":
-			runStatus()
-			os.Exit(0)
 		case "sync":
 			runSync()
 			os.Exit(0)
 		case "stash":
 			runStash()
-			os.Exit(0)
-		case "log":
-			runLog()
 			os.Exit(0)
 		case "pr":
 			runPR()
@@ -168,9 +162,6 @@ usage:
   commitdog init            create a new GitHub repo and first push
   commitdog setup           configure email and GitHub token
 
-  commitdog log             interactive git log with colored branch graph
-                            j/k scroll  a show all  q quit
-
   commitdog revert          pick from last 5 commits and revert
 
   commitdog branch          1 switch  2 create new  3 delete
@@ -185,8 +176,6 @@ usage:
                             on main: list open PRs, view diff, merge, close
 
   commitdog secrets          scan full commit history for leaked secrets
-
-  commitdog status          project dashboard — commits, PRs, branches, version
 
   commitdog sync            fetch + pull rebase + push in one command
 
@@ -205,36 +194,33 @@ usage:
 
 workflow:
   first time:
-    commitdog setup         ← set email + GitHub token once
+    commitdog setup         - set email + GitHub token once
     mkdir my-project && cd my-project
-    commitdog init          ← creates repo on GitHub, first commit, push
+    commitdog init          - creates repo on GitHub, first commit, push
 
   daily:
-    commitdog               ← stages everything, suggests message, commits
-    commitdog file.go       ← stage one file, suggest message, commit
-    commitdog sync          ← fetch + rebase + push in one shot
-    commitdog branch        ← switch / create / delete
-    commitdog switch        ← straight to branch picker
-    commitdog stash         ← save work in progress
-    commitdog log           ← see branch graph and commit history
+    commitdog               - stages everything, suggests message, commits
+    commitdog file.go       - stage one file, suggest message, commit
+    commitdog sync          - fetch + rebase + push in one shot
+    commitdog branch        - switch / create / delete
+    commitdog switch        - straight to branch picker
+    commitdog stash         - save work in progress
 
   branching:
-    commitdog branch ls     ← see all branches
-    commitdog branch create ← new branch, suggests names from diff
-    commitdog switch        ← pick from recent or type name
-    commitdog branch delete ← safe delete with unmerged warning
+    commitdog branch ls     - see all branches
+    commitdog branch create - new branch, suggests names from diff
+    commitdog switch        - pick from recent or type name
+    commitdog branch delete - safe delete with unmerged warning
 
   pull requests:
-    commitdog pr            ← create PR from feature branch with diff preview
-    commitdog pr            ← list + review + merge PRs when on main
+    commitdog pr            - create PR from feature branch with diff preview
+    commitdog pr            - list + review + merge PRs when on main
 
   releasing:
-    commitdog release       ← bump version, build, tag, push, upload to GitHub
+    commitdog release       - bump version, build, tag, push, upload to GitHub
 
   oops:
-    commitdog revert        ← pick a commit to revert and push
-
-no ai. no network (except push/init/pr/release). no telemetry. just works.`)
+    commitdog revert        - pick a commit to revert and push`)
 }
 
 func fatal(format string, args ...interface{}) {
