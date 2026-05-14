@@ -352,7 +352,6 @@ func isMergeCommit(hash string) bool {
 }
 
 func getMergeParentBranches(hash string) (parent1, parent2 string) {
-	// get short hashes of both parents
 	cmd1 := exec.Command("git", "rev-parse", "--short", hash+"^1")
 	cmd1.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
 	var out1 bytes.Buffer
@@ -367,14 +366,12 @@ func getMergeParentBranches(hash string) (parent1, parent2 string) {
 	cmd2.Run()
 	p2 := strings.TrimSpace(out2.String())
 
-	// try to resolve parent hashes to branch names
 	parent1 = resolveBranchName(p1)
 	parent2 = resolveBranchName(p2)
 	return
 }
 
 func resolveBranchName(hash string) string {
-	// try to find a branch pointing to this commit
 	cmd := exec.Command("git", "branch", "--all", "--format=%(refname:short)", "--points-at", hash)
 	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
 	var out bytes.Buffer
@@ -382,7 +379,6 @@ func resolveBranchName(hash string) string {
 	if err := cmd.Run(); err != nil || strings.TrimSpace(out.String()) == "" {
 		return hash
 	}
-	// return first branch name found, prefer local over remote
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	for _, l := range lines {
 		l = strings.TrimSpace(l)

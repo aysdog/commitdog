@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -87,26 +88,6 @@ func runCommit(message string) error {
 	return nil
 }
 
-func runPush(remote, branch string) error {
-	if !isSafeGitRef(remote) || !isSafeGitRef(branch) {
-		return fmt.Errorf("invalid remote or branch name")
-	}
-
-	cmd := exec.Command("git", "push", remote, branch)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if isHTTPSAuthError(msg) {
-			return tryFixHTTPSRemote(remote, branch)
-		}
-		return fmt.Errorf("%s", msg)
-	}
-	return nil
-}
-
 func isHTTPSAuthError(msg string) bool {
 	return strings.Contains(msg, "Password authentication is not supported") ||
 		strings.Contains(msg, "Invalid username or password") ||
@@ -114,7 +95,6 @@ func isHTTPSAuthError(msg string) bool {
 }
 
 func tryFixHTTPSRemote(remote, branch string) error {
-	// get current remote URL
 	cmd := exec.Command("git", "remote", "get-url", remote)
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -127,7 +107,6 @@ func tryFixHTTPSRemote(remote, branch string) error {
 		return fmt.Errorf("push failed: authentication error")
 	}
 
-	// convert https://github.com/user/repo.git → git@github.com:user/repo.git
 	sshURL := strings.Replace(currentURL, "https://github.com/", "git@github.com:", 1)
 
 	fmt.Println()
@@ -143,7 +122,6 @@ func tryFixHTTPSRemote(remote, branch string) error {
 		return fmt.Errorf("push aborted")
 	}
 
-	// switch remote to SSH
 	setCmd := exec.Command("git", "remote", "set-url", remote, sshURL)
 	var stderr bytes.Buffer
 	setCmd.Stderr = &stderr
@@ -154,7 +132,6 @@ func tryFixHTTPSRemote(remote, branch string) error {
 	fmt.Printf("  ✓ remote switched to SSH\n")
 	fmt.Printf("  retrying push...\n")
 
-	// retry push
 	pushCmd := exec.Command("git", "push", remote, branch)
 	var pushStderr bytes.Buffer
 	pushCmd.Stderr = &pushStderr
@@ -276,4 +253,84 @@ func isDirtyWorkingTree() bool {
 		return false
 	}
 	return strings.TrimSpace(out.String()) != ""
+}
+
+func authHeaderForPlatform(token string) string {
+	if token == "" {
+		return ""
+	}
+	creds := "oauth2:" + token
+	encoded := base64.StdEncoding.EncodeToString([]byte(creds))
+	return "Authorization: Basic " + encoded
+}
+
+func currentAuthHeader() string {
+	c := loadConfig()
+	proj := loadProjectConfig()
+	platform := proj.platform
+	if platform == "" {
+		platform = "github"
+	}
+	return authHeaderForPlatform(tokenForPlatform(c, platform))
+}
+
+func runPushWithAuth(remote, branch, authHeader string) error {
+	if !isSafeGitRef(remote) || !isSafeGitRef(branch) {
+		return fmt.Errorf("invalid remote or branch name")
+	}
+	var cmd *exec.Cmd
+	if authHeader != "" {
+		cmd = exec.Command("git", "-c", "http.extraHeader="+authHeader, "push", remote, branch)
+	} else {
+		cmd = exec.Command("git", "push", remote, branch)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if isHTTPSAuthError(msg) {
+			return tryFixHTTPSRemote(remote, branch)
+		}
+		return fmt.Errorf("%s", msg)
+	}
+	return nil
+}
+
+func runPushUpstreamWithAuth(remote, branch, authHeader string) error {
+	if !isSafeGitRef(remote) || !isSafeGitRef(branch) {
+		return fmt.Errorf("invalid remote or branch name")
+	}
+	var cmd *exec.Cmd
+	if authHeader != "" {
+		cmd = exec.Command("git", "-c", "http.extraHeader="+authHeader, "push", "--set-upstream", remote, branch)
+	} else {
+		cmd = exec.Command("git", "push", "--set-upstream", remote, branch)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func runPushTagsWithAuth(remote, branch, authHeader string) error {
+	if !isSafeGitRef(remote) || !isSafeGitRef(branch) {
+		return fmt.Errorf("invalid remote or branch name")
+	}
+	var cmd *exec.Cmd
+	if authHeader != "" {
+		cmd = exec.Command("git", "-c", "http.extraHeader="+authHeader, "push", remote, branch, "--tags")
+	} else {
+		cmd = exec.Command("git", "push", remote, branch, "--tags")
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
+	}
+	return nil
 }

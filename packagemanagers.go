@@ -17,7 +17,7 @@ func runUpdateBrew() {
 		fatal("not a git repository.")
 	}
 	cfg := loadConfig()
-	if cfg.Token == "" {
+	if cfg.GitHub.Token == "" {
 		fatal("no GitHub token found. run 'commitdog setup' first.")
 	}
 	_, repo := getRepoOwnerAndName()
@@ -28,13 +28,13 @@ func runUpdateBrew() {
 	fmt.Println()
 	fmt.Printf("  updating homebrew tap for v%s...\n\n", ver)
 
-	sha256map, err := fetchChecksums(cfg.Token, repo, ver)
+	sha256map, err := fetchChecksums(cfg.GitHub.Token, repo, ver)
 	if err != nil {
 		fatal("could not fetch checksums: %v", err)
 	}
 
 	fmt.Printf("  %-38s", "updating homebrew tap...")
-	if err := updateHomebrew(cfg.Token, ver, repo, sha256map); err != nil {
+	if err := updateHomebrew(cfg.GitHub.Token, ver, repo, sha256map); err != nil {
 		fmt.Printf("\033[31m✗\033[0m\n")
 		fatal("%s", err)
 	}
@@ -47,7 +47,7 @@ func runUpdateAUR() {
 		fatal("not a git repository.")
 	}
 	cfg := loadConfig()
-	if cfg.Token == "" {
+	if cfg.GitHub.Token == "" {
 		fatal("no GitHub token found. run 'commitdog setup' first.")
 	}
 	_, repo := getRepoOwnerAndName()
@@ -58,7 +58,7 @@ func runUpdateAUR() {
 	fmt.Println()
 	fmt.Printf("  updating AUR PKGBUILD for v%s...\n\n", ver)
 
-	sha256map, err := fetchChecksums(cfg.Token, repo, ver)
+	sha256map, err := fetchChecksums(cfg.GitHub.Token, repo, ver)
 	if err != nil {
 		fatal("could not fetch checksums: %v", err)
 	}

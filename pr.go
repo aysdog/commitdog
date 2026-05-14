@@ -41,7 +41,7 @@ func runPR() {
 	}
 
 	cfg := loadConfig()
-	if cfg.Token == "" {
+	if cfg.GitHub.Token == "" {
 		fatal("no GitHub token found. run 'commitdog setup' first.")
 	}
 
@@ -49,11 +49,11 @@ func runPR() {
 	baseBranch := getBaseBranch()
 
 	if branch == "main" || branch == "master" || branch == baseBranch {
-		runPRList(cfg.Token)
+		runPRList(cfg.GitHub.Token)
 		return
 	}
 
-	runPRCreate(cfg.Token, branch, baseBranch)
+	runPRCreate(cfg.GitHub.Token, branch, baseBranch)
 }
 
 func runPRCreate(token, branch, base string) {
@@ -396,21 +396,29 @@ func getRepoOwnerAndName() (string, string) {
 	if err := cmd.Run(); err != nil {
 		return "", ""
 	}
-	url := strings.TrimSpace(out.String())
-	if strings.HasPrefix(url, "git@github.com:") {
-		path := strings.TrimPrefix(url, "git@github.com:")
-		path = strings.TrimSuffix(path, ".git")
-		parts := strings.SplitN(path, "/", 2)
+	return parseRemoteOwnerAndName(strings.TrimSpace(out.String()))
+}
+
+func parseRemoteOwnerAndName(rawURL string) (string, string) {
+	rawURL = strings.TrimSuffix(rawURL, ".git")
+	if strings.HasPrefix(rawURL, "git@") {
+		parts := strings.SplitN(rawURL, ":", 2)
 		if len(parts) == 2 {
-			return parts[0], parts[1]
+			ownerRepo := strings.SplitN(parts[1], "/", 2)
+			if len(ownerRepo) == 2 {
+				return ownerRepo[0], ownerRepo[1]
+			}
 		}
+		return "", ""
 	}
-	if strings.HasPrefix(url, "https://github.com/") {
-		path := strings.TrimPrefix(url, "https://github.com/")
-		path = strings.TrimSuffix(path, ".git")
-		parts := strings.SplitN(path, "/", 2)
-		if len(parts) == 2 {
-			return parts[0], parts[1]
+	if idx := strings.Index(rawURL, "://"); idx >= 0 {
+		rest := rawURL[idx+3:]
+		if at := strings.LastIndex(rest, "@"); at >= 0 {
+			rest = rest[at+1:]
+		}
+		parts := strings.SplitN(rest, "/", 3)
+		if len(parts) == 3 {
+			return parts[1], parts[2]
 		}
 	}
 	return "", ""

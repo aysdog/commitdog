@@ -200,13 +200,19 @@ func runRelease() {
 	}
 
 	cfg := loadConfig()
-	if cfg.Token == "" {
-		fatal("no GitHub token found. run 'commitdog setup' first.")
+	proj2 := loadProjectConfig()
+	platform := proj2.platform
+	if platform == "" {
+		platform = "github"
+	}
+	token := tokenForPlatform(cfg, platform)
+	if token == "" {
+		fatal("no %s token found. run 'commitdog setup' first.", platform)
 	}
 
 	owner, repo := getRepoOwnerAndName()
 	if owner == "" || repo == "" {
-		fatal("could not detect GitHub repo.")
+		fatal("could not detect %s repo.", platform)
 	}
 
 	proj, fileVer := detectProject()
@@ -350,22 +356,9 @@ func runRelease() {
 		return nil
 	})
 
+	authHeader := authHeaderForPlatform(token)
 	printStepOrRollback("pushing...", &undos, func() error {
-		cmd := exec.Command("git", "push", "origin", "main", "--tags")
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		if err := cmd.Run(); err != nil {
-			msg := strings.TrimSpace(stderr.String())
-			r := detectAndRecover(msg)
-			if r != nil {
-				fmt.Println()
-				if offerRecovery(r) {
-					return nil
-				}
-			}
-			return fmt.Errorf("%s", msg)
-		}
-		return nil
+		return runPushTagsWithAuth("origin", "main", authHeader)
 	}, func() error {
 		exec.Command("git", "push", "origin", ":refs/tags/v"+nextVer).Run()
 		if preRelease != "" {
@@ -374,54 +367,11 @@ func runRelease() {
 		return nil
 	})
 
-	var releaseID int64
-	var uploadURL string
-	printStepOrRollback("creating GitHub release...", &undos, func() error {
-		id, url, err := createGitHubReleaseWithBody(cfg.Token, owner, repo, nextVer, changelog)
-		if err != nil {
-			return err
-		}
-		releaseID = id
-		uploadURL = url
-		return nil
-	}, func() error {
-		if releaseID != 0 {
-			githubRequest("DELETE",
-				fmt.Sprintf("/repos/%s/%s/releases/%d", owner, repo, releaseID),
-				cfg.Token, nil,
-			)
-		}
-		return nil
-	})
-
-	if isGo && uploadURL != "" {
-		sha256lines := []string{}
-		for _, bin := range binaries {
-			b := bin
-			printStepOrRollback("uploading "+b+"...", &undos, func() error {
-				return uploadReleaseAsset(cfg.Token, uploadURL, b)
-			}, nil)
-			sum := fileSHA256(b)
-			if sum != "" {
-				sha256lines = append(sha256lines, sum+"  "+b)
-			}
-		}
-		for _, bin := range binaries {
-			os.Remove(bin)
-		}
-		if len(sha256lines) > 0 {
-			checksumFile := "checksums.txt"
-			os.WriteFile(checksumFile, []byte(strings.Join(sha256lines, "\n")+"\n"), 0644)
-			printStepOrRollback("uploading checksums.txt...", &undos, func() error {
-				return uploadReleaseAsset(cfg.Token, uploadURL, checksumFile)
-			}, nil)
-			os.Remove(checksumFile)
-		}
-	}
+	releaseURL := platformRelease(cfg, platform, owner, repo, nextVer, changelog, isGo, binaries, &undos)
 
 	fmt.Println()
 	fmt.Printf("  \033[32m✓ v%s released\033[0m\n", nextVer)
-	fmt.Printf("  https://github.com/%s/%s/releases/tag/v%s\n\n", owner, repo, nextVer)
+	fmt.Printf("  %s\n\n", releaseURL)
 }
 
 func printStepOrRollback(label string, undos *[]undoStep, fn func() error, undo func() error) {
@@ -558,4 +508,210 @@ func uploadReleaseAsset(token, uploadURL, path string) error {
 		return fmt.Errorf("upload failed: HTTP %d — %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 	return nil
+}
+
+func buildChecksums(binaries []string) (string, []string) {
+	var lines []string
+	for _, bin := range binaries {
+		sum := fileSHA256(bin)
+		if sum != "" {
+			lines = append(lines, sum+"  "+bin)
+		}
+	}
+	if len(lines) == 0 {
+		return "", nil
+	}
+	checksumFile := "checksums.txt"
+	os.WriteFile(checksumFile, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	return checksumFile, lines
+}
+
+func platformRelease(cfg config, platform, owner, repo, nextVer, changelog string, isGo bool, binaries []string, undos *[]undoStep) string {
+	token := tokenForPlatform(cfg, platform)
+
+	switch platform {
+	case "gitlab":
+		return releaseGitLab(cfg, token, owner, repo, nextVer, changelog, isGo, binaries, undos)
+	case "gitea":
+		return releaseGitea(token, cfg.Gitea.Host, owner, repo, nextVer, changelog, isGo, binaries, undos)
+	case "forgejo":
+		return releaseForgejo(token, cfg.Forgejo.Host, owner, repo, nextVer, changelog, isGo, binaries, undos)
+	default:
+		return releaseGitHub(token, owner, repo, nextVer, changelog, isGo, binaries, undos)
+	}
+}
+
+func releaseGitHub(token, owner, repo, nextVer, changelog string, isGo bool, binaries []string, undos *[]undoStep) string {
+	var releaseID int64
+	var uploadURL string
+	printStepOrRollback("creating GitHub release...", undos, func() error {
+		id, url, err := createGitHubReleaseWithBody(token, owner, repo, nextVer, changelog)
+		if err != nil {
+			return err
+		}
+		releaseID = id
+		uploadURL = url
+		return nil
+	}, func() error {
+		if releaseID != 0 {
+			githubRequest("DELETE",
+				fmt.Sprintf("/repos/%s/%s/releases/%d", owner, repo, releaseID),
+				token, nil,
+			)
+		}
+		return nil
+	})
+
+	if isGo && uploadURL != "" {
+		checksumFile, _ := buildChecksums(binaries)
+		for _, bin := range binaries {
+			b := bin
+			printStepOrRollback("uploading "+b+"...", undos, func() error {
+				return uploadReleaseAsset(token, uploadURL, b)
+			}, nil)
+		}
+		for _, bin := range binaries {
+			os.Remove(bin)
+		}
+		if checksumFile != "" {
+			printStepOrRollback("uploading checksums.txt...", undos, func() error {
+				return uploadReleaseAsset(token, uploadURL, checksumFile)
+			}, nil)
+			os.Remove(checksumFile)
+		}
+	}
+
+	return fmt.Sprintf("https://github.com/%s/%s/releases/tag/v%s", owner, repo, nextVer)
+}
+
+func releaseGitLab(cfg config, token, owner, repo, nextVer, changelog string, isGo bool, binaries []string, undos *[]undoStep) string {
+	host := gitlabHost(cfg)
+
+	var projectID string
+	printStepOrRollback("creating GitLab release...", undos, func() error {
+		id, err := getGitLabProjectID(token, host, owner, repo)
+		if err != nil {
+			return err
+		}
+		projectID = id
+		return createGitLabRelease(token, host, projectID, nextVer, changelog)
+	}, func() error {
+		if projectID != "" {
+			gitlabRequest("DELETE",
+				fmt.Sprintf("/projects/%s/releases/v%s", projectID, nextVer),
+				token, host, nil,
+			)
+		}
+		return nil
+	})
+
+	if isGo && projectID != "" {
+		checksumFile, _ := buildChecksums(binaries)
+		allFiles := append(binaries, checksumFile)
+		for _, bin := range allFiles {
+			if bin == "" {
+				continue
+			}
+			b := bin
+			printStepOrRollback("uploading "+b+"...", undos, func() error {
+				pkgURL, err := uploadGitLabPackage(token, host, projectID, repo, nextVer, b)
+				if err != nil {
+					return err
+				}
+				return addGitLabReleaseLink(token, host, projectID, nextVer, filepath.Base(b), pkgURL)
+			}, nil)
+		}
+		for _, bin := range binaries {
+			os.Remove(bin)
+		}
+		if checksumFile != "" {
+			os.Remove(checksumFile)
+		}
+	}
+
+	return fmt.Sprintf("%s/%s/%s/-/releases/v%s", host, owner, repo, nextVer)
+}
+
+func releaseGitea(token, host, owner, repo, nextVer, changelog string, isGo bool, binaries []string, undos *[]undoStep) string {
+	var releaseID int64
+	printStepOrRollback("creating Gitea release...", undos, func() error {
+		id, err := createGiteaRelease(token, host, owner, repo, nextVer, changelog)
+		if err != nil {
+			return err
+		}
+		releaseID = id
+		return nil
+	}, func() error {
+		if releaseID != 0 {
+			giteaRequest("DELETE",
+				fmt.Sprintf("/repos/%s/%s/releases/%d", owner, repo, releaseID),
+				token, host, nil,
+			)
+		}
+		return nil
+	})
+
+	if isGo && releaseID != 0 {
+		checksumFile, _ := buildChecksums(binaries)
+		allFiles := append(binaries, checksumFile)
+		var toUpload []string
+		for _, f := range allFiles {
+			if f != "" {
+				toUpload = append(toUpload, f)
+			}
+		}
+		printStepOrRollback("uploading assets...", undos, func() error {
+			return uploadGiteaAssetsBatched(token, host, owner, repo, releaseID, toUpload)
+		}, nil)
+		for _, bin := range binaries {
+			os.Remove(bin)
+		}
+		if checksumFile != "" {
+			os.Remove(checksumFile)
+		}
+	}
+
+	return fmt.Sprintf("%s/%s/%s/releases/tag/v%s", host, owner, repo, nextVer)
+}
+
+func releaseForgejo(token, host, owner, repo, nextVer, changelog string, isGo bool, binaries []string, undos *[]undoStep) string {
+	var releaseID int64
+	printStepOrRollback("creating Forgejo release...", undos, func() error {
+		id, err := createForgejoRelease(token, host, owner, repo, nextVer, changelog)
+		if err != nil {
+			return err
+		}
+		releaseID = id
+		return nil
+	}, func() error {
+		if releaseID != 0 {
+			forgejoRequest("DELETE",
+				fmt.Sprintf("/repos/%s/%s/releases/%d", owner, repo, releaseID),
+				token, host, nil,
+			)
+		}
+		return nil
+	})
+
+	if isGo && releaseID != 0 {
+		checksumFile, _ := buildChecksums(binaries)
+		allFiles := append(binaries, checksumFile)
+		var toUpload []string
+		for _, f := range allFiles {
+			if f != "" {
+				toUpload = append(toUpload, f)
+			}
+		}
+		printStepOrRollback("uploading assets...", undos, func() error {
+			return uploadForgejoAssetsBatched(token, host, owner, repo, releaseID, toUpload)
+		}, nil)
+		for _, bin := range binaries {
+			os.Remove(bin)
+		}
+		if checksumFile != "" {
+			os.Remove(checksumFile)
+		}
+	}
+
+	return fmt.Sprintf("%s/%s/%s/releases/tag/v%s", host, owner, repo, nextVer)
 }
