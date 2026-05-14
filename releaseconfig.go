@@ -8,6 +8,7 @@ import (
 
 type projectConfig struct {
 	configured bool
+	platform   string
 	targets    []string
 }
 
@@ -46,16 +47,22 @@ func loadProjectConfig() projectConfig {
 	cfg := projectConfig{}
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "configured = ") {
-			cfg.configured = strings.TrimPrefix(line, "configured = ") == "true"
+		key, val, ok := parseKV(line)
+		if !ok {
+			continue
 		}
-		if strings.HasPrefix(line, "targets = [") {
-			inner := strings.TrimPrefix(line, "targets = [")
+		switch key {
+		case "configured":
+			cfg.configured = val == "true"
+		case "platform":
+			cfg.platform = val
+		case "targets":
+			inner := strings.TrimPrefix(val, "[")
 			inner = strings.TrimSuffix(inner, "]")
 			for _, part := range strings.Split(inner, ",") {
-				key := strings.Trim(strings.TrimSpace(part), "\"")
-				if key != "" {
-					cfg.targets = append(cfg.targets, key)
+				t := strings.Trim(strings.TrimSpace(part), "\"")
+				if t != "" {
+					cfg.targets = append(cfg.targets, t)
 				}
 			}
 		}
@@ -68,28 +75,31 @@ func saveProjectConfig(cfg projectConfig) error {
 	for i, t := range cfg.targets {
 		quoted[i] = "\"" + t + "\""
 	}
-	content := fmt.Sprintf("configured = %v\ntargets = [%s]\n",
-		cfg.configured,
-		strings.Join(quoted, ", "),
-	)
-	return os.WriteFile(".commitdog", []byte(content), 0644)
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("configured = %v\n", cfg.configured))
+	if cfg.platform != "" {
+		sb.WriteString(fmt.Sprintf("platform = \"%s\"\n", cfg.platform))
+	}
+	if len(cfg.targets) > 0 {
+		sb.WriteString(fmt.Sprintf("targets = [%s]\n", strings.Join(quoted, ", ")))
+	}
+
+	return os.WriteFile(".commitdog", []byte(sb.String()), 0644)
 }
 
 func runReleaseConfig() {
 	cfg := loadProjectConfig()
 
 	selected := map[string]bool{}
-	if len(cfg.targets) > 0 {
-		for _, t := range cfg.targets {
-			selected[t] = true
-		}
+	for _, t := range cfg.targets {
+		selected[t] = true
 	}
 
 	fmt.Println()
 	fmt.Println("  select build targets:")
 	fmt.Println()
 	fmt.Println("  enter numbers separated by spaces, e.g. 1, 2, 3")
-	fmt.Println()
 
 	for {
 		fmt.Println()
@@ -179,8 +189,7 @@ func ensureReleaseConfig() []buildTarget {
 	fmt.Printf("  [1/2/q] pick › ")
 
 	for {
-		input := strings.TrimSpace(readLine())
-		switch input {
+		switch strings.TrimSpace(readLine()) {
 		case "1":
 			runReleaseConfig()
 			cfg = loadProjectConfig()
