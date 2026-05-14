@@ -31,15 +31,12 @@ func printAsciiArt() {
 	fmt.Println()
 	fmt.Println("  " + bold + yellow + "commitdog" + reset + dim + " v" + version + reset)
 	fmt.Println("  " + dim + "─────────────────────────────────" + reset)
-	fmt.Println("  zero-bs commits · no AI · no telemetry")
-	fmt.Println()
-	fmt.Println(dim + "  git, but make it not painful." + reset)
+	fmt.Println(dim + "  git workflow, simplified." + reset)
 	fmt.Println()
 
 	cmds := [][]string{
 		{"commitdog", "stage · commit · push"},
 		{"commitdog init", "create repo · first push"},
-		{"commitdog log", "colored branch graph"},
 		{"commitdog branch", "branch management"},
 		{"commitdog switch", "switch branches fast"},
 		{"commitdog merge", "merge with diff preview"},
