@@ -88,11 +88,12 @@ func runSync() {
 	}
 
 	fmt.Printf("  pushing...")
+	authHeader := currentAuthHeader()
 	var pushErr error
 	if !hasUpstream(branch) {
-		pushErr = runPushUpstream(remote, branch)
+		pushErr = runPushUpstreamWithAuth(remote, branch, authHeader)
 	} else {
-		pushErr = runPush(remote, branch)
+		pushErr = runPushWithAuth(remote, branch, authHeader)
 	}
 	if pushErr != nil {
 		fmt.Println()

@@ -95,11 +95,12 @@ func askPush() {
 		switch input {
 		case "y", "yes", "":
 			fmt.Printf("  pushing...")
+			authHeader := currentAuthHeader()
 			var err error
 			if !hasUpstream(branch) {
-				err = runPushUpstream(remote, branch)
+				err = runPushUpstreamWithAuth(remote, branch, authHeader)
 			} else {
-				err = runPush(remote, branch)
+				err = runPushWithAuth(remote, branch, authHeader)
 			}
 			if err != nil {
 				fmt.Println()
