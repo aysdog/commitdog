@@ -1,12 +1,14 @@
 <div align="center">
 
+<img src="logo.svg" width="80" height="80" alt="commitdog">
+
 # commitdog
 
 ![license](https://img.shields.io/badge/license-MIT-brightgreen?style=flat-square) ![go](https://img.shields.io/badge/go-1.22%2B-00ADD8?style=flat-square&logo=go&logoColor=white) ![platform](https://img.shields.io/badge/platform-linux%20%7C%20macOS%20%7C%20windows-lightgrey?style=flat-square) ![telemetry](https://img.shields.io/badge/telemetry-none-4ade80?style=flat-square) ![part of](https://img.shields.io/badge/part%20of-aysdog-orange?style=flat-square)
 
-git workflow CLI. zero dependencies. single binary.
+git, without the grief.
 
-commit messages, branch management, sync, log, PR, release — all from one tool. pure Go stdlib. no AI. no telemetry.
+commit messages, branch management, sync, PR, release — all from one tool. pure Go stdlib. no AI. no telemetry. works with GitHub, GitLab, Gitea, and Forgejo.
 
 ---
 
@@ -42,15 +44,32 @@ irm https://aysdog.com/install-commitdog.ps1 | iex
 
 ## setup
 
-run once to save your GitHub email and a classic PAT:
-
 ```sh
 commitdog setup
 ```
 
-stored at `~/.config/commitdog/config.toml` with `0600` permissions. never leaves your machine except when calling the GitHub API.
+picks which platform to configure, saves your email and token. run it once per platform — you can have tokens for all four stored at the same time.
 
-you need a **classic** Personal Access Token with `repo`, `write:org`, and `read:user` scopes. get one at [github.com/settings/tokens](https://github.com/settings/tokens).
+```
+  which platform token do you want to configure?
+
+  1  github
+  2  gitlab
+  3  gitea
+  4  forgejo
+
+  [1/2/3/4] pick › 1
+```
+
+stored at `~/.config/commitdog/config.toml` with `0600` permissions. never leaves your machine except when calling the platform API.
+
+**token scopes needed:**
+
+| platform | scope |
+|----------|-------|
+| GitHub | `repo`, `write:org`, `read:user` — classic PAT at [github.com/settings/tokens](https://github.com/settings/tokens) |
+| GitLab | `api` — legacy token at [gitlab.com/-/profile/personal_access_tokens](https://gitlab.com/-/profile/personal_access_tokens) |
+| Gitea / Forgejo | `repository`, `organization`, `user` read+write — under settings → applications |
 
 ---
 
@@ -60,9 +79,8 @@ you need a **classic** Personal Access Token with `repo`, `write:org`, and `read
 |---------|-------------|
 | `commitdog` | stage all, suggest 4 commit messages, pick, commit, push |
 | `commitdog <file>` | stage a specific file only |
-| `commitdog init` | create GitHub repo, git init, first commit, first push |
-| `commitdog setup` | save GitHub email and PAT |
-| `commitdog log` | interactive git log with colored branch graph |
+| `commitdog init` | create repo on your platform, git init, first commit, first push |
+| `commitdog setup` | configure email and platform token |
 | `commitdog branch` | interactive branch menu |
 | `commitdog switch` | jump to branch switcher |
 | `commitdog branch create` | create new branch with optional base |
@@ -72,10 +90,9 @@ you need a **classic** Personal Access Token with `repo`, `write:org`, and `read
 | `commitdog sync` | fetch + pull rebase + push — auto-recovers on errors |
 | `commitdog stash` | save, pop, or drop stashes interactively |
 | `commitdog revert` | pick from last 5 commits and revert |
-| `commitdog release` | bump version, build 5 binaries, changelog, tag, push, GitHub release + checksums |
+| `commitdog release` | bump version, build binaries, changelog, tag, push, create release + checksums |
 | `commitdog release config` | configure which platforms to build for |
 | `commitdog release --changelog-only` | preview grouped changelog since last tag |
-| `commitdog status` | project dashboard — commits, PRs, branches, version |
 | `commitdog secrets` | scan full commit history for leaked secrets |
 | `commitdog --update` | update to latest release |
 | `commitdog --version` | print version |
@@ -120,7 +137,7 @@ before showing suggestions, commitdog silently scans your staged diff. if it fin
   commit anyway? this will push secrets to your remote. [y/N] ›
 ```
 
-catches AWS keys, GitHub tokens, private keys, Stripe keys, Slack tokens, generic passwords and API keys. skips `_test` files automatically.
+catches AWS keys, GitHub tokens, GitLab tokens, private keys, Stripe keys, Slack tokens, generic passwords and API keys. skips `_test` files automatically.
 
 ---
 
@@ -151,9 +168,9 @@ commitdog release
 ```
 
 ```
-  detected: Go  ·  current version: v0.2.6
+  detected: Go  ·  current version: v0.2.8
 
-  1  patch  →  v0.2.7
+  1  patch  →  v0.2.9
   2  minor  →  v0.3.0
   3  major  →  v1.0.0
   4  custom
@@ -161,10 +178,10 @@ commitdog release
   [1/2/3/4/q] pick › 1
 
   changelog preview:
-  ### Bug Fixes
-  - fix(sync): handle missing upstream on first push
+  ### Features
+  - feat: add gitlab gitea forgejo support
 
-  release v0.2.6 → v0.2.7? [y/n] › y
+  release v0.2.8 → v0.2.9? [y/n] › y
 
   bumping version in main.go...              ✓
   building linux/amd64...                    ✓
@@ -173,7 +190,7 @@ commitdog release
   building darwin/arm64...                   ✓
   building windows/amd64...                  ✓
   committing...                              ✓
-  tagging v0.2.7...                          ✓
+  tagging v0.2.9...                          ✓
   pushing...                                 ✓
   creating GitHub release...                 ✓
   uploading commitdog-linux-amd64...         ✓
@@ -183,13 +200,15 @@ commitdog release
   uploading commitdog-windows-amd64.exe...   ✓
   uploading checksums.txt...                 ✓
 
-  ✓ v0.2.7 released
-  https://github.com/aysdog/commitdog/releases/tag/v0.2.7
+  ✓ v0.2.9 released
+  https://github.com/aysdog/commitdog/releases/tag/v0.2.9
 ```
 
-every step registers an undo. if anything fails — network cut, GitHub API down, build error — commitdog rolls back every completed step in reverse. your repo is always left clean.
+every step registers an undo. if anything fails — network cut, API down, build error — commitdog rolls back every completed step in reverse. your repo is always left clean.
 
-**version drift detection** — if your version file says `v0.2.5` but the latest git tag is `v0.2.6`, commitdog warns before touching anything.
+**version drift detection** — if your version file says `v0.2.8` but the latest git tag is `v0.2.9`, commitdog warns before touching anything.
+
+**platform support** — release works the same across GitHub, GitLab, Gitea, and Forgejo. GitLab uses Generic Packages + Release Links. Gitea and Forgejo upload assets in batches to stay within API limits.
 
 ---
 
@@ -227,23 +246,26 @@ on a feature branch — interactive diff viewer → create PR. on main — list 
 
 ---
 
-## git log
-
-```sh
-commitdog log
-```
-
-each branch gets its own RGB color. `j`/`k` to scroll, `a` to show all commits, `q` to quit.
-
----
-
 ## new project
 
 ```sh
 commitdog init
 ```
 
-creates a GitHub repo via API, runs `git init`, makes the first commit, sets the remote, and pushes — no browser needed.
+asks which platform, creates the repo via API, runs `git init`, makes the first commit, sets the remote, and pushes. no browser needed. works with GitHub, GitLab, Gitea, and Forgejo.
+
+```
+  which platform is this repo on?
+
+  1  github
+  2  gitlab
+  3  gitea
+  4  forgejo
+
+  [1/2/3/4] pick › 1
+```
+
+per-platform email is set automatically per repo via `git config --local` — your global git email stays untouched.
 
 ---
 
