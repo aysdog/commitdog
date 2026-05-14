@@ -14,10 +14,9 @@ import (
 const githubAPI = "https://api.github.com"
 
 type createRepoRequest struct {
-	Name        string `json:"name"`
-	Private     bool   `json:"private"`
-	AutoInit    bool   `json:"auto_init"`
-	Description string `json:"description"`
+	Name     string `json:"name"`
+	Private  bool   `json:"private"`
+	AutoInit bool   `json:"auto_init"`
 }
 
 type repoResponse struct {
@@ -61,11 +60,7 @@ func getGitHubOrgs(token string) ([]string, error) {
 }
 
 func createPersonalRepo(token, name string, private bool) (repoResponse, error) {
-	payload := createRepoRequest{
-		Name:     name,
-		Private:  private,
-		AutoInit: false,
-	}
+	payload := createRepoRequest{Name: name, Private: private}
 	body, err := githubRequest("POST", "/user/repos", token, payload)
 	if err != nil {
 		return repoResponse{}, err
@@ -81,11 +76,7 @@ func createOrgRepo(token, org, name string, private bool) (repoResponse, error) 
 	if !isSafeGitRef(org) {
 		return repoResponse{}, fmt.Errorf("invalid org name")
 	}
-	payload := createRepoRequest{
-		Name:     name,
-		Private:  private,
-		AutoInit: false,
-	}
+	payload := createRepoRequest{Name: name, Private: private}
 	body, err := githubRequest("POST", "/orgs/"+org+"/repos", token, payload)
 	if err != nil {
 		return repoResponse{}, err
@@ -97,7 +88,7 @@ func createOrgRepo(token, org, name string, private bool) (repoResponse, error) 
 	return r, nil
 }
 
-func githubRequest(method, path string, token string, payload interface{}) ([]byte, error) {
+func githubRequest(method, path, token string, payload interface{}) ([]byte, error) {
 	var body io.Reader
 	if payload != nil {
 		data, err := json.Marshal(payload)
@@ -115,7 +106,7 @@ func githubRequest(method, path string, token string, payload interface{}) ([]by
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "commitdog/0.1.1")
+	req.Header.Set("User-Agent", "commitdog/"+version)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -161,14 +152,47 @@ func setGitEmail(email string) error {
 	return exec.Command("git", "config", "--global", "user.email", email).Run()
 }
 
-func hasSSHKey() bool {
-	cmd := exec.Command("ssh", "-T", "git@github.com", "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes")
+func setGitEmailLocal(email string) error {
+	email = sanitizeInput(email)
+	if email == "" || !strings.Contains(email, "@") {
+		return fmt.Errorf("invalid email")
+	}
+	return exec.Command("git", "config", "--local", "user.email", email).Run()
+}
+
+func sshHostForPlatform(c config, platform string) string {
+	switch platform {
+	case "gitlab":
+		host := c.GitLab.Host
+		if host == "" {
+			return "gitlab.com"
+		}
+		return strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://")
+	case "gitea":
+		host := c.Gitea.Host
+		if host == "" {
+			return ""
+		}
+		return strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://")
+	default:
+		return "github.com"
+	}
+}
+
+func hasSSHKey(host string) bool {
+	if host == "" {
+		return false
+	}
+	cmd := exec.Command("ssh", "-T", "git@"+host,
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "BatchMode=yes",
+	)
 	err := cmd.Run()
 	if err != nil {
-		exitErr, ok := err.(*exec.ExitError)
-		if ok && exitErr.ExitCode() == 1 {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return true
 		}
+		return false
 	}
-	return false
+	return true
 }
