@@ -273,7 +273,7 @@ func doCreateBranch(name string) {
 	}
 
 	fmt.Printf("  pushing...")
-	if err := runPushUpstream(remotes[0], name); err != nil {
+	if err := runPushUpstreamWithAuth(remotes[0], name, currentAuthHeader()); err != nil {
 		fmt.Printf("\n  push failed: %v\n", err)
 	} else {
 		fmt.Printf("\n  ✓ pushed %s to %s\n", name, remotes[0])
@@ -306,31 +306,59 @@ func runBranchList() {
 	fmt.Println()
 }
 
+func isProtectedBranch(b string) bool {
+	return b == "main" || b == "master"
+}
+
+func isLocalOnly(b string) bool {
+	return !hasRemoteBranch("origin", b)
+}
+
 func runBranchDelete() {
-	branches, err := getDeletableBranches()
+	all, err := getAllBranches()
 	if err != nil {
 		fatal("could not list branches: %v", err)
 	}
+
+	current := getCurrentBranch()
+	var branches []string
+	for _, b := range all {
+		if b != current {
+			branches = append(branches, b)
+		}
+	}
+
 	if len(branches) == 0 {
 		fmt.Println()
-		fmt.Println("  no branches available to delete.")
-		fmt.Println("  (current branch, main, and master are protected)")
+		fmt.Println("  no other branches found.")
 		fmt.Println()
 		return
 	}
-
-	current := getCurrentBranch()
 
 	fmt.Println()
 	fmt.Println("  select branch to delete:")
 	fmt.Println()
 
 	for i, b := range branches {
+		if isProtectedBranch(b) {
+			fmt.Printf("  %d  %-28s %s\n", i+1, b, colorMuted("(protected)"))
+			continue
+		}
+		var tags []string
+		if isLocalOnly(b) {
+			tags = append(tags, "local")
+		}
 		merged, _ := isMergedBranch(b, current)
 		if merged {
-			fmt.Printf("  %d  %s %s\n", i+1, b, colorMuted("(merged)"))
+			tags = append(tags, "merged")
 		} else {
-			fmt.Printf("  %d  %s %s\n", i+1, b, colorRed("(unmerged)"))
+			tags = append(tags, "unmerged")
+		}
+		label := "(" + strings.Join(tags, ", ") + ")"
+		if !merged {
+			fmt.Printf("  %d  %-28s %s\n", i+1, b, colorRed(label))
+		} else {
+			fmt.Printf("  %d  %-28s %s\n", i+1, b, colorMuted(label))
 		}
 	}
 
@@ -346,72 +374,70 @@ func runBranchDelete() {
 		}
 
 		for i, b := range branches {
-			if input == fmt.Sprintf("%d", i+1) {
-				merged, _ := isMergedBranch(b, current)
-				if !merged {
-					fmt.Printf("\n  %s %s has unmerged commits.\n", colorRed("⚠"), b)
-					fmt.Printf("  delete anyway? this cannot be undone. [y/N] › ")
-					confirm := readLine()
-					if confirm != "y" && confirm != "yes" {
-						fmt.Println("  aborted.")
-						return
-					}
-					fmt.Printf("  force deleting %s...", b)
-					if err := gitDeleteBranchForce(b); err != nil {
-						fmt.Println()
-						fatal("delete failed: %v", err)
-					}
-				} else {
-					fmt.Printf("  deleting %s...", b)
-					if err := gitDeleteBranch(b); err != nil {
-						fmt.Println()
-						fatal("delete failed: %v", err)
-					}
-				}
-				fmt.Println(" done")
-				fmt.Printf("  ✓ deleted %s\n\n", b)
+			if input != fmt.Sprintf("%d", i+1) {
+				continue
+			}
+			if isProtectedBranch(b) {
+				fmt.Printf("  %s is protected and cannot be deleted.\n", b)
+				fmt.Printf("  [1-%d] pick, [q] quit › ", len(branches))
+				break
+			}
 
-				remotes := getRemotes()
-				if len(remotes) == 0 {
+			localOnly := isLocalOnly(b)
+			merged, _ := isMergedBranch(b, current)
+
+			if !merged {
+				fmt.Printf("\n  %s %s has unmerged commits.\n", colorRed("⚠"), b)
+				fmt.Printf("  delete anyway? this cannot be undone. [y/N] › ")
+				confirm := readLine()
+				if confirm != "y" && confirm != "yes" {
+					fmt.Println("  aborted.")
 					return
 				}
-				if hasRemoteBranch(remotes[0], b) {
-					fmt.Printf("  delete %s from %s too? [y/N] › ", b, remotes[0])
-					confirm := readLine()
-					if confirm == "y" || confirm == "yes" {
-						fmt.Printf("  deleting remote branch...")
-						if err := gitDeleteRemoteBranch(remotes[0], b); err != nil {
-							fmt.Printf("\n  remote delete failed: %v\n", err)
-						} else {
-							fmt.Printf("\n  ✓ deleted %s/%s\n", remotes[0], b)
-						}
-					}
+				fmt.Printf("  deleting %s...", b)
+				if err := gitDeleteBranchForce(b); err != nil {
+					fmt.Println()
+					fatal("delete failed: %v", err)
 				}
+			} else {
+				fmt.Printf("  deleting %s...", b)
+				if err := gitDeleteBranch(b); err != nil {
+					fmt.Println()
+					fatal("delete failed: %v", err)
+				}
+			}
+			fmt.Println(" done")
+			fmt.Printf("  ✓ deleted %s\n\n", b)
+
+			if localOnly {
 				return
 			}
+
+			remotes := getRemotes()
+			if len(remotes) == 0 {
+				return
+			}
+
+			if !hasRemoteBranch(remotes[0], b) {
+				fmt.Printf("  remote branch is not there.\n\n")
+				return
+			}
+
+			fmt.Printf("  delete %s from %s too? [y/N] › ", b, remotes[0])
+			confirm := readLine()
+			if confirm == "y" || confirm == "yes" {
+				fmt.Printf("  deleting remote branch...")
+				if err := gitDeleteRemoteBranch(remotes[0], b); err != nil {
+					fmt.Printf("\n  remote delete failed: %v\n", err)
+				} else {
+					fmt.Printf("\n  ✓ deleted %s/%s\n", remotes[0], b)
+				}
+			}
+			return
 		}
 
 		fmt.Printf("  enter 1-%d or q › ", len(branches))
 	}
-}
-
-func getDeletableBranches() ([]string, error) {
-	all, err := getAllBranches()
-	if err != nil {
-		return nil, err
-	}
-	current := getCurrentBranch()
-	var result []string
-	for _, b := range all {
-		if b == current {
-			continue
-		}
-		if b == "main" || b == "master" {
-			continue
-		}
-		result = append(result, b)
-	}
-	return result, nil
 }
 
 func isMergedBranch(branch, current string) (bool, error) {
@@ -535,20 +561,6 @@ func gitCheckoutNewBranch(name, base string) error {
 		return fmt.Errorf("invalid branch name")
 	}
 	cmd := exec.Command("git", "checkout", "-b", name, base)
-	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
-	}
-	return nil
-}
-
-func runPushUpstream(remote, branch string) error {
-	if !isSafeGitRef(remote) || !isSafeGitRef(branch) {
-		return fmt.Errorf("invalid remote or branch name")
-	}
-	cmd := exec.Command("git", "push", "--set-upstream", remote, branch)
 	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

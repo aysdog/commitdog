@@ -121,7 +121,7 @@ func detectAndRecover(stderr string) *recovery {
 				if len(remotes) == 0 {
 					return fmt.Errorf("no remote found")
 				}
-				return runPushUpstream(remotes[0], branch)
+				return runPushUpstreamWithAuth(remotes[0], branch, currentAuthHeader())
 			},
 		}
 	}
