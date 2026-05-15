@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
+	"unicode"
 )
 
 func buildChangelog(sinceTag string) string {
@@ -49,13 +51,13 @@ func buildChangelog(sinceTag string) string {
 		matched := false
 		for _, key := range order[:len(order)-1] {
 			if strings.HasPrefix(line, key+"(") || strings.HasPrefix(line, key+":") {
-				groups[key] = append(groups[key], line)
+				groups[key] = append(groups[key], cleanChangelogLine(line))
 				matched = true
 				break
 			}
 		}
 		if !matched {
-			groups["other"] = append(groups["other"], line)
+			groups["other"] = append(groups["other"], cleanChangelogLine(line))
 		}
 	}
 
@@ -133,4 +135,15 @@ func fileSHA256(path string) string {
 		return ""
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func cleanChangelogLine(s string) string {
+	re := regexp.MustCompile(`^[a-z]+(?:\([^)]+\))?:\s*`)
+	s = re.ReplaceAllString(s, "")
+	if s == "" {
+		return s
+	}
+	runes := []rune(s)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
 }

@@ -225,6 +225,38 @@ func runRelease() {
 	}
 
 	gitTag := getLatestGitTag()
+
+	if gitTag == "" && hasRemoteTags() {
+		fmt.Println()
+		fmt.Println("  no local tags found but remote has tags.")
+		fmt.Println()
+		fmt.Println("  1  mirror repo — fetch tags from remote")
+		fmt.Println("  2  new repo — start fresh")
+		fmt.Println()
+		fmt.Printf("  [1/2/q] pick › ")
+		for {
+			switch strings.TrimSpace(readLine()) {
+			case "1":
+				fmt.Printf("  fetching tags...")
+				if err := fetchTags(); err != nil {
+					fmt.Println()
+					fatal("could not fetch tags: %v", err)
+				}
+				fmt.Println(" done")
+				gitTag = getLatestGitTag()
+			case "2":
+			case "q", "":
+				fmt.Println("  aborted.")
+				return
+			default:
+				fmt.Printf("  1, 2, or q › ")
+				continue
+			}
+			break
+		}
+		fmt.Println()
+	}
+
 	if gitTag != "" && fileVer != gitTag {
 		fmt.Printf("\n  %s version drift: %s says v%s but latest git tag is v%s\n", colorRed("!"), proj.file, fileVer, gitTag)
 		fmt.Printf("  release anyway? [y/N] › ")
@@ -714,4 +746,24 @@ func releaseForgejo(token, host, owner, repo, nextVer, changelog string, isGo bo
 	}
 
 	return fmt.Sprintf("%s/%s/%s/releases/tag/v%s", host, owner, repo, nextVer)
+}
+
+func hasRemoteTags() bool {
+	cmd := exec.Command("git", "ls-remote", "--tags", "origin")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	return strings.TrimSpace(out.String()) != ""
+}
+
+func fetchTags() error {
+	cmd := exec.Command("git", "fetch", "--tags", "origin")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
+	}
+	return nil
 }

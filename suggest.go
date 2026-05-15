@@ -6,6 +6,84 @@ import (
 	"strings"
 )
 
+func isLargeDiff(a analysis) bool {
+	return len(a.filesAdded)+len(a.filesModified)+len(a.filesDeleted) > 2
+}
+
+func subjectLine(s string) string {
+	if idx := strings.Index(s, "\n"); idx >= 0 {
+		return s[:idx]
+	}
+	return s
+}
+
+func withBody(subject string, a analysis) string {
+	body := buildBody(a)
+	if body == "" {
+		return subject
+	}
+	return subject + "\n\n" + body
+}
+
+func buildBody(a analysis) string {
+	if !isLargeDiff(a) {
+		return ""
+	}
+
+	var lines []string
+
+	if len(a.addedFuncs) > 0 {
+		funcs := firstN(a.addedFuncs, 4)
+		line := "adds " + joinNames(funcs)
+		if len(a.addedFuncs) > 4 {
+			line += fmt.Sprintf(" and %d more functions", len(a.addedFuncs)-4)
+		}
+		lines = append(lines, line)
+	} else if len(a.filesAdded) > 0 {
+		names := make([]string, 0, len(a.filesAdded))
+		for _, f := range firstN(a.filesAdded, 3) {
+			names = append(names, cleanFileName(f))
+		}
+		line := "adds " + joinNames(names)
+		if len(a.filesAdded) > 3 {
+			line += fmt.Sprintf(" and %d more files", len(a.filesAdded)-3)
+		}
+		lines = append(lines, line)
+	}
+
+	if len(a.removedFuncs) > 0 {
+		funcs := firstN(a.removedFuncs, 3)
+		line := "removes " + joinNames(funcs)
+		if len(a.removedFuncs) > 3 {
+			line += fmt.Sprintf(" and %d more", len(a.removedFuncs)-3)
+		}
+		lines = append(lines, line)
+	} else if len(a.filesDeleted) > 0 && len(lines) > 0 {
+		names := make([]string, 0, len(a.filesDeleted))
+		for _, f := range firstN(a.filesDeleted, 2) {
+			names = append(names, cleanFileName(f))
+		}
+		lines = append(lines, "removes "+joinNames(names))
+	}
+
+	if len(a.filesModified) > 0 && len(a.addedFuncs) == 0 && len(a.removedFuncs) == 0 {
+		names := make([]string, 0, len(a.filesModified))
+		for _, f := range firstN(a.filesModified, 3) {
+			names = append(names, cleanFileName(f))
+		}
+		line := "updates " + joinNames(names)
+		if len(a.filesModified) > 3 {
+			line += fmt.Sprintf(" and %d more", len(a.filesModified)-3)
+		}
+		lines = append(lines, line)
+	}
+
+	if len(lines) > 3 {
+		lines = lines[:3]
+	}
+	return strings.Join(lines, "\n")
+}
+
 func generateSuggestions(a analysis) []string {
 	var suggestions []string
 
@@ -14,20 +92,20 @@ func generateSuggestions(a analysis) []string {
 	s3 := buildBrief(a)
 	s4 := buildSummary(a)
 
-	suggestions = append(suggestions, s1)
+	suggestions = append(suggestions, withBody(s1, a))
 	if s2 != "" && s2 != s1 {
-		suggestions = append(suggestions, s2)
+		suggestions = append(suggestions, withBody(s2, a))
 	}
 	if s3 != "" && s3 != s1 && s3 != s2 {
-		suggestions = append(suggestions, s3)
+		suggestions = append(suggestions, withBody(s3, a))
 	}
 
 	if len(suggestions) < 2 {
-		suggestions = append(suggestions, buildFallback(a))
+		suggestions = append(suggestions, withBody(buildFallback(a), a))
 	}
 
 	if s4 != "" && s4 != s1 && s4 != s2 && s4 != s3 {
-		suggestions = append(suggestions, s4)
+		suggestions = append(suggestions, withBody(s4, a))
 	}
 
 	return suggestions
@@ -134,24 +212,13 @@ func buildSummary(a analysis) string {
 	if len(a.filesModified) > 0 {
 		if len(a.addedFuncs) > 0 {
 			funcs := firstN(a.addedFuncs, 2)
-			desc := "add " + joinNames(funcs)
-			if len(a.addedFuncs) > 2 {
-				desc += fmt.Sprintf(" +%d more", len(a.addedFuncs)-2)
-			}
-			parts = append(parts, desc)
+			parts = append(parts, "add "+joinNames(funcs))
 		} else if len(a.removedFuncs) > 0 {
 			funcs := firstN(a.removedFuncs, 2)
-			desc := "remove " + joinNames(funcs)
-			if len(a.removedFuncs) > 2 {
-				desc += fmt.Sprintf(" +%d more", len(a.removedFuncs)-2)
-			}
-			parts = append(parts, desc)
+			parts = append(parts, "remove "+joinNames(funcs))
 		} else {
 			for _, f := range firstN(a.filesModified, 2) {
 				parts = append(parts, "update "+cleanFileName(f))
-			}
-			if len(a.filesModified) > 2 {
-				parts = append(parts, fmt.Sprintf("+%d more files", len(a.filesModified)-2))
 			}
 		}
 	}
@@ -178,6 +245,18 @@ func buildSummary(a analysis) string {
 }
 
 func buildDescription(a analysis) string {
+	if isLargeDiff(a) && len(a.addedFuncs) == 0 && len(a.removedFuncs) == 0 {
+		if len(a.filesAdded) > 0 && len(a.filesModified) > 0 {
+			return fmt.Sprintf("add and update %s", a.primaryScope)
+		}
+		if len(a.filesAdded) > 0 {
+			return fmt.Sprintf("add %s", a.primaryScope)
+		}
+		if len(a.filesModified) > 0 {
+			return fmt.Sprintf("update %s", a.primaryScope)
+		}
+	}
+
 	if a.isDeleteOnly {
 		if len(a.filesDeleted) == 1 {
 			return fmt.Sprintf("remove %s", cleanFileName(a.filesDeleted[0]))

@@ -17,7 +17,7 @@ func pickSuggestion(suggestions []string) string {
 	fmt.Println()
 
 	for i, s := range suggestions {
-		fmt.Printf("  %d  %s\n", i+1, s)
+		fmt.Printf("  %d  %s\n", i+1, subjectLine(s))
 	}
 
 	fmt.Println()
