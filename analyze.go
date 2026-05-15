@@ -82,7 +82,7 @@ var (
 
 	reErrorHandling = regexp.MustCompile(`^\+.*(?:err|error|Error|exception|Exception|catch|rescue)\b`)
 	reLogging       = regexp.MustCompile(`^\+.*(?:log\.|logger\.|console\.log|fmt\.Print|println!|logging\.)`)
-	reRmLogging     = regexp.MustCompile(`^-.*(?:console\.log|fmt\.Print|println!|log\.Debug)`)
+	reRmLogging     = regexp.MustCompile(`^-.*(?:console\.log|println!|log\.Debug|log\.Printf|log\.Println)`)
 	reTest          = regexp.MustCompile(`^\+.*(?:func Test|it\(|describe\(|test\(|assert|expect\()`)
 	reComment       = regexp.MustCompile(`^\+\s*(?://|#|/\*|\*)`)
 )
