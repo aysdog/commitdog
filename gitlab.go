@@ -119,18 +119,36 @@ func createGitLabRepo(token, host, name string, private bool) (repoResponse, err
 	return repoResponse{SSHURL: r.SSHURLToRepo, HTMLURL: r.HTTPURLToRepo, Name: r.Name}, nil
 }
 
+func getGitLabGroupID(token, host, group string) (int64, error) {
+	body, err := gitlabRequest("GET", "/groups/"+group, token, host, nil)
+	if err != nil {
+		return 0, err
+	}
+	var g struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(body, &g); err != nil {
+		return 0, err
+	}
+	return g.ID, nil
+}
+
 func createGitLabGroupRepo(token, host, group, name string, private bool) (repoResponse, error) {
 	if !isSafeGitRef(group) {
 		return repoResponse{}, fmt.Errorf("invalid group name")
+	}
+	namespaceID, err := getGitLabGroupID(token, host, group)
+	if err != nil {
+		return repoResponse{}, fmt.Errorf("could not find group %s: %v", group, err)
 	}
 	visibility := "public"
 	if private {
 		visibility = "private"
 	}
 	payload := map[string]interface{}{
-		"name":       name,
-		"visibility": visibility,
-		"namespace":  group,
+		"name":         name,
+		"visibility":   visibility,
+		"namespace_id": namespaceID,
 	}
 	body, err := gitlabRequest("POST", "/projects", token, host, payload)
 	if err != nil {
