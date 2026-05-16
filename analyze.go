@@ -7,28 +7,32 @@ import (
 )
 
 type analysis struct {
-	filesChanged  int
-	filesAdded    []string
-	filesDeleted  []string
-	filesModified []string
-	primaryScope  string
-	commitType    string
-	addedFuncs    []string
-	removedFuncs  []string
-	renamedFuncs  [][2]string
-	addedVars     []string
-	removedVars   []string
-	renamedFiles  [][2]string
-	branchHint    string
-	patterns      []string
-	isMigration   bool
-	isDepUpdate   bool
-	isDocsOnly    bool
-	isTestOnly    bool
-	isConfigOnly  bool
-	isDeleteOnly  bool
-	isNewFiles    bool
-	isRenameOnly  bool
+	filesChanged     int
+	filesAdded       []string
+	filesDeleted     []string
+	filesModified    []string
+	primaryScope     string
+	commitType       string
+	addedFuncs       []string
+	removedFuncs     []string
+	renamedFuncs     [][2]string
+	addedVars        []string
+	removedVars      []string
+	renamedFiles     [][2]string
+	branchHint       string
+	patterns         []string
+	isMigration      bool
+	isDepUpdate      bool
+	isDocsOnly       bool
+	isTestOnly       bool
+	isConfigOnly     bool
+	isDeleteOnly     bool
+	isNewFiles       bool
+	isRenameOnly     bool
+	detectedVersions []string
+	htmlElements     []string
+	cssClasses       []string
+	shellFuncs       []string
 }
 
 var (
@@ -39,6 +43,9 @@ var (
 	docFilePatterns = []string{
 		"README", ".md", ".rst", ".txt", "CHANGELOG", "LICENSE", "CONTRIBUTING",
 	}
+	htmlFilePatterns   = []string{".html", ".htm"}
+	cssFilePatterns    = []string{".css", ".scss", ".less", ".sass"}
+	shellFilePatterns  = []string{".sh", ".bash", ".zsh", ".fish"}
 	configFilePatterns = []string{
 		".toml", ".yaml", ".yml", ".json", ".env", ".ini", ".cfg",
 		"Makefile", "Dockerfile", ".dockerignore", ".gitignore",
@@ -79,6 +86,15 @@ var (
 	reVarJSRm  = regexp.MustCompile(`^-(?:const|let|var)\s+(\w{2,})\s*[=;]`)
 	reVarPyAdd = regexp.MustCompile(`^\+([A-Z][A-Z0-9_]{2,})\s*=`)
 	reVarPyRm  = regexp.MustCompile(`^-([A-Z][A-Z0-9_]{2,})\s*=`)
+
+	reVersion      = regexp.MustCompile(`v\d+\.\d+\.\d+`)
+	reHTMLTag      = regexp.MustCompile(`^\+\s*<(section|article|nav|header|footer|main|form|dialog|template|aside|table|ul|ol)\b`)
+	reHTMLId       = regexp.MustCompile(`^\+.*\bid="([a-zA-Z][\w-]+)"`)
+	reCSSClass     = regexp.MustCompile(`^\+\.([a-zA-Z][\w-]{2,})\s*(?:\{|,)`)
+	reCSSVar       = regexp.MustCompile(`^\+\s*--([a-zA-Z][\w-]+)\s*:`)
+	reFuncSh       = regexp.MustCompile(`^\+(?:function\s+)?(\w+)\s*\(\s*\)\s*\{`)
+	reVarGoBlock   = regexp.MustCompile(`^\+\t([a-zA-Z]\w{2,})\s*(?:=|\s+\*?[A-Z])`)
+	reVarGoBlockRm = regexp.MustCompile(`^-\t([a-zA-Z]\w{2,})\s*(?:=|\s+\*?[A-Z])`)
 
 	reErrorHandling = regexp.MustCompile(`^\+.*(?:err|error|Error|exception|Exception|catch|rescue)\b`)
 	reLogging       = regexp.MustCompile(`^\+.*(?:log\.|logger\.|console\.log|fmt\.Print|println!|logging\.)`)
@@ -193,6 +209,37 @@ func analyzeDiffWithBranch(diff string, branch string) analysis {
 			a.removedVars = appendUnique(a.removedVars, v)
 		}
 
+		if strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") {
+			if m := reVersion.FindString(line); m != "" {
+				if strings.HasPrefix(line, "+") {
+					a.detectedVersions = appendUnique(a.detectedVersions, m)
+				}
+			}
+		}
+
+		ext := strings.ToLower(filepath.Ext(currentFile))
+		if ext == ".html" || ext == ".htm" {
+			if m := reHTMLTag.FindStringSubmatch(line); len(m) > 1 {
+				a.htmlElements = appendUnique(a.htmlElements, m[1])
+			}
+			if m := reHTMLId.FindStringSubmatch(line); len(m) > 1 {
+				a.htmlElements = appendUnique(a.htmlElements, m[1])
+			}
+		}
+		if ext == ".css" || ext == ".scss" || ext == ".less" || ext == ".sass" {
+			if m := reCSSClass.FindStringSubmatch(line); len(m) > 1 {
+				a.cssClasses = appendUnique(a.cssClasses, m[1])
+			}
+			if m := reCSSVar.FindStringSubmatch(line); len(m) > 1 {
+				a.cssClasses = appendUnique(a.cssClasses, "--"+m[1])
+			}
+		}
+		if ext == ".sh" || ext == ".bash" || ext == ".zsh" || ext == ".fish" {
+			if m := reFuncSh.FindStringSubmatch(line); len(m) > 1 {
+				a.shellFuncs = appendUnique(a.shellFuncs, m[1])
+			}
+		}
+
 		if reErrorHandling.MatchString(line) {
 			a.patterns = appendUnique(a.patterns, "error-handling")
 		}
@@ -270,6 +317,13 @@ func categorizeFile(a *analysis, path string) {
 		a.isDocsOnly = true
 		return
 	}
+	if isHTMLFile(path) || isCSSFile(path) || isShellFile(path) {
+		a.filesModified = appendUnique(a.filesModified, path)
+		a.isTestOnly = false
+		a.isDocsOnly = false
+		a.isConfigOnly = false
+		return
+	}
 	if isConfigFile(path) {
 		a.filesModified = appendUnique(a.filesModified, path)
 		a.isConfigOnly = true
@@ -307,6 +361,20 @@ func extractVarName(line, file string, added bool) string {
 	}
 
 	if re == nil {
+		if ext == ".go" {
+			var blockRe *regexp.Regexp
+			if added {
+				blockRe = reVarGoBlock
+			} else {
+				blockRe = reVarGoBlockRm
+			}
+			if m := blockRe.FindStringSubmatch(line); len(m) > 1 {
+				name := m[1]
+				if len(name) > 1 {
+					return name
+				}
+			}
+		}
 		return ""
 	}
 	if m := re.FindStringSubmatch(line); len(m) > 1 {
@@ -368,6 +436,8 @@ func extractFuncName(line, file string, added bool) string {
 			patterns = []*regexp.Regexp{reFuncRs}
 		case ".java", ".kt":
 			patterns = []*regexp.Regexp{reFuncJava}
+		case ".sh", ".bash", ".zsh", ".fish":
+			patterns = []*regexp.Regexp{reFuncSh}
 		}
 	} else {
 		switch ext {
@@ -456,6 +526,18 @@ func inferType(a analysis) string {
 		if strings.HasPrefix(hint, "test/") {
 			return "test"
 		}
+	}
+
+	if len(a.detectedVersions) > 0 && len(a.addedFuncs) == 0 && len(a.removedFuncs) == 0 {
+		return "chore"
+	}
+
+	if len(a.htmlElements) > 0 {
+		return "feat"
+	}
+
+	if len(a.cssClasses) > 0 {
+		return "feat"
 	}
 
 	if a.isRenameOnly {
@@ -573,4 +655,34 @@ func firstN(slice []string, n int) []string {
 		return slice
 	}
 	return slice[:n]
+}
+
+func isHTMLFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	for _, p := range htmlFilePatterns {
+		if ext == p {
+			return true
+		}
+	}
+	return false
+}
+
+func isCSSFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	for _, p := range cssFilePatterns {
+		if ext == p {
+			return true
+		}
+	}
+	return false
+}
+
+func isShellFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	for _, p := range shellFilePatterns {
+		if ext == p {
+			return true
+		}
+	}
+	return false
 }

@@ -195,6 +195,16 @@ func buildBrief(a analysis) string {
 	return ""
 }
 
+func inferHTMLType(a analysis) string {
+	if len(a.htmlElements) > 0 {
+		return "feat"
+	}
+	if len(a.detectedVersions) > 0 {
+		return "chore"
+	}
+	return "chore"
+}
+
 func buildFallback(a analysis) string {
 	if a.primaryScope != "" {
 		return fmt.Sprintf("%s: update %s", a.commitType, a.primaryScope)
@@ -245,6 +255,30 @@ func buildSummary(a analysis) string {
 }
 
 func buildDescription(a analysis) string {
+	if len(a.detectedVersions) > 0 {
+		latest := a.detectedVersions[len(a.detectedVersions)-1]
+		return fmt.Sprintf("update version references to %s", latest)
+	}
+
+	if len(a.htmlElements) > 0 {
+		elems := firstN(a.htmlElements, 2)
+		return fmt.Sprintf("add %s section", joinNames(elems))
+	}
+
+	if len(a.cssClasses) > 0 {
+		classes := firstN(a.cssClasses, 2)
+		return fmt.Sprintf("add %s styles", joinNames(classes))
+	}
+
+	if len(a.shellFuncs) > 0 {
+		funcs := firstN(a.shellFuncs, 2)
+		return fmt.Sprintf("add %s", joinNames(funcs))
+	}
+
+	if len(a.addedVars) > 0 && len(a.removedVars) > 0 {
+		return fmt.Sprintf("update %s", joinNames(firstN(a.removedVars, 2)))
+	}
+
 	if isLargeDiff(a) && len(a.addedFuncs) == 0 && len(a.removedFuncs) == 0 {
 		if len(a.filesAdded) > 0 && len(a.filesModified) > 0 {
 			return fmt.Sprintf("add and update %s", a.primaryScope)
