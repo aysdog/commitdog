@@ -18,6 +18,9 @@ func pickSuggestion(suggestions []string) string {
 
 	for i, s := range suggestions {
 		fmt.Printf("  %d  %s\n", i+1, subjectLine(s))
+		if preview := bodyPreview(s); preview != "" {
+			fmt.Printf("     \033[90m%s\033[0m\n", preview)
+		}
 	}
 
 	fmt.Println()

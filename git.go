@@ -147,11 +147,15 @@ func tryFixHTTPSRemote(remote, branch string) error {
 
 func sanitizeMessage(s string) string {
 	s = strings.ReplaceAll(s, "\x00", "")
-
-	s = strings.TrimSpace(s)
-	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", "")
-	return s
+	s = strings.TrimSpace(s)
+
+	parts := strings.SplitN(s, "\n\n", 2)
+	parts[0] = strings.ReplaceAll(parts[0], "\n", " ")
+	if len(parts) == 2 {
+		return parts[0] + "\n\n" + strings.TrimSpace(parts[1])
+	}
+	return parts[0]
 }
 
 func isSafeGitRef(s string) bool {
@@ -362,4 +366,18 @@ func gitAddRemote(name, url string) error {
 		return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
 	}
 	return nil
+}
+
+func hasUnpushedCommits(remote, branch string) bool {
+	if !isSafeGitRef(remote) || !isSafeGitRef(branch) {
+		return false
+	}
+	cmd := exec.Command("git", "log", remote+"/"+branch+"..HEAD", "--oneline")
+	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	return strings.TrimSpace(out.String()) != ""
 }

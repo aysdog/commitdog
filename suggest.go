@@ -17,6 +17,23 @@ func subjectLine(s string) string {
 	return s
 }
 
+func bodyPreview(s string) string {
+	idx := strings.Index(s, "\n\n")
+	if idx < 0 {
+		return ""
+	}
+	body := strings.TrimSpace(s[idx+2:])
+	lines := strings.Split(body, "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	first := lines[0]
+	if len(first) > 60 {
+		first = first[:57] + "..."
+	}
+	return first
+}
+
 func withBody(subject string, a analysis) string {
 	body := buildBody(a)
 	if body == "" {
@@ -188,7 +205,7 @@ func buildBrief(a analysis) string {
 	}
 
 	n := len(a.filesModified) + len(a.filesAdded) + len(a.filesDeleted)
-	if n > 1 {
+	if n > 1 && len(a.addedFuncs) == 0 && len(a.removedFuncs) == 0 {
 		return fmt.Sprintf("%s: update %d files", a.commitType, n)
 	}
 
@@ -384,6 +401,10 @@ func buildDescription(a analysis) string {
 	if len(a.addedFuncs) > 0 && len(a.removedFuncs) > 0 {
 		if len(a.addedFuncs) == 1 && len(a.removedFuncs) == 1 {
 			return fmt.Sprintf("replace %s with %s", a.removedFuncs[0], a.addedFuncs[0])
+		}
+		if isLargeDiff(a) {
+			funcs := firstN(a.addedFuncs, 3)
+			return fmt.Sprintf("add %s", joinNames(funcs))
 		}
 		return fmt.Sprintf("refactor %s", a.primaryScope)
 	}

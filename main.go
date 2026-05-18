@@ -147,6 +147,21 @@ func runCommitFlow(files []string, platform string) {
 
 	if diff == "" && len(stagedNew) == 0 {
 		warnEmptyDirs()
+		proj := loadProjectConfig()
+		targetPlatform := platform
+		if targetPlatform == "" {
+			targetPlatform = proj.effectivePrimary()
+		}
+		if targetPlatform == "" {
+			targetPlatform = "github"
+		}
+		remote := platformRemoteName(targetPlatform)
+		branch := getCurrentBranch()
+		if hasUnpushedCommits(remote, branch) {
+			fmt.Printf("  nothing to commit — pushing unpushed commits to %s...\n", targetPlatform)
+			askPush(platform)
+			return
+		}
 		fatal("nothing to commit — no changes found.")
 	}
 
