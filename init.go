@@ -420,7 +420,8 @@ func addMirrorPlatform(proj projectConfig, c config) {
 	var remoteURL string
 	if err != nil {
 		fmt.Println()
-		if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "exists") {
+		errMsg := strings.ToLower(err.Error())
+		if strings.Contains(errMsg, "already exists") || strings.Contains(errMsg, "exists") || strings.Contains(errMsg, "repository creation failed") || strings.Contains(errMsg, "name already") {
 			fmt.Printf("  repo '%s' already exists on %s.\n\n", currentRepo, mirrorPlatform)
 			fmt.Println("  1  use existing repo as mirror")
 			fmt.Println("  2  choose a different name")
