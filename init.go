@@ -14,6 +14,12 @@ func runInit() {
 
 	c := loadConfig()
 	proj := loadProjectConfig()
+
+	if proj.effectivePrimary() != "" {
+		handleConfiguredRepo(proj, c)
+		return
+	}
+
 	platform := proj.platform
 
 	if platform == "" {
@@ -262,4 +268,189 @@ func isSafeRepoName(s string) bool {
 		}
 	}
 	return true
+}
+
+func handleConfiguredRepo(proj projectConfig, c config) {
+	primary := proj.effectivePrimary()
+	fmt.Println()
+	fmt.Printf("  this repo is configured for %s.\n", primary)
+	if len(proj.mirrors) > 0 {
+		fmt.Printf("  mirrors: %s\n", strings.Join(proj.mirrors, ", "))
+	}
+	fmt.Println()
+	fmt.Println("  1  change platform")
+	fmt.Println("  2  add mirror")
+	fmt.Println("  3  cancel")
+	fmt.Println()
+	fmt.Printf("  [1/2/3] pick › ")
+
+	switch strings.TrimSpace(readLine()) {
+	case "1":
+		changePrimaryPlatform(proj)
+	case "2":
+		addMirrorPlatform(proj, c)
+	default:
+		fmt.Println("  cancelled.")
+	}
+}
+
+func changePrimaryPlatform(proj projectConfig) {
+	all := []string{"github", "gitlab", "gitea", "forgejo"}
+	fmt.Println()
+	fmt.Println("  select new primary platform:")
+	fmt.Println()
+	for i, p := range all {
+		fmt.Printf("  %d  %s\n", i+1, p)
+	}
+	fmt.Println()
+	fmt.Printf("  [1-%d] pick, [q] quit › ", len(all))
+
+	for {
+		input := strings.TrimSpace(readLine())
+		if input == "q" || input == "" {
+			fmt.Println("  cancelled.")
+			return
+		}
+		for i, p := range all {
+			if input == fmt.Sprintf("%d", i+1) {
+				proj.primary = p
+				proj.platform = p
+				if err := saveProjectConfig(proj); err != nil {
+					fatal("could not update .commitdog: %v", err)
+				}
+				fmt.Printf("  ✓ primary platform changed to %s\n\n", p)
+				return
+			}
+		}
+		fmt.Printf("  1-%d or q › ", len(all))
+	}
+}
+
+func addMirrorPlatform(proj projectConfig, c config) {
+	primary := proj.effectivePrimary()
+	all := []string{"github", "gitlab", "gitea", "forgejo"}
+
+	var available []string
+	for _, p := range all {
+		if p == primary {
+			continue
+		}
+		already := false
+		for _, m := range proj.mirrors {
+			if m == p {
+				already = true
+				break
+			}
+		}
+		if !already {
+			available = append(available, p)
+		}
+	}
+
+	if len(available) == 0 {
+		fmt.Println("  all platforms are already configured.")
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("  add which platform as mirror?")
+	fmt.Println()
+	for i, p := range available {
+		fmt.Printf("  %d  %s\n", i+1, p)
+	}
+	fmt.Println()
+	fmt.Printf("  [1-%d] pick, [q] quit › ", len(available))
+
+	var mirrorPlatform string
+	for {
+		input := strings.TrimSpace(readLine())
+		if input == "q" || input == "" {
+			fmt.Println("  cancelled.")
+			return
+		}
+		for i, p := range available {
+			if input == fmt.Sprintf("%d", i+1) {
+				mirrorPlatform = p
+				break
+			}
+		}
+		if mirrorPlatform != "" {
+			break
+		}
+		fmt.Printf("  1-%d or q › ", len(available))
+	}
+
+	token := tokenForPlatform(c, mirrorPlatform)
+	if token == "" {
+		fatal("no token for %s. run 'commitdog setup' first.", mirrorPlatform)
+	}
+
+	fmt.Printf("  connecting to %s...", mirrorPlatform)
+	username, err := platformUsername(c, mirrorPlatform)
+	if err != nil {
+		fmt.Println()
+		fatal("could not connect to %s: %v", mirrorPlatform, err)
+	}
+	fmt.Printf("\n  ✓ connected as %s\n\n", username)
+
+	_, currentRepo := getRepoOwnerAndName()
+	fmt.Printf("  repo name [%s] › ", currentRepo)
+	input := sanitizeInput(readLine())
+	if input != "" {
+		currentRepo = input
+	}
+
+	fmt.Printf("  private or public? [P/u] › ")
+	private := true
+	for {
+		inp := strings.ToLower(sanitizeInput(readLine()))
+		if inp == "" || inp == "p" {
+			private = true
+			break
+		}
+		if inp == "u" {
+			private = false
+			break
+		}
+		fmt.Printf("  P or u › ")
+	}
+
+	fmt.Printf("\n  creating repo on %s...", mirrorPlatform)
+	repo, err := platformCreateRepo(c, mirrorPlatform, username, username, currentRepo, private)
+	if err != nil {
+		fmt.Println()
+		fatal("failed to create repo: %v", err)
+	}
+	fmt.Printf("\n  ✓ repo created: %s\n\n", repo.HTMLURL)
+
+	remoteURL := repo.SSHURL
+	if !hasSSHKey(sshHostForPlatform(c, mirrorPlatform)) {
+		remoteURL = strings.TrimSuffix(repo.HTMLURL, ".git") + ".git"
+	}
+
+	remoteName := platformRemoteName(mirrorPlatform)
+	if err := gitAddRemote(remoteName, remoteURL); err != nil {
+		fmt.Printf("  warning: could not add remote: %v\n", err)
+	} else {
+		fmt.Printf("  ✓ remote '%s' added\n", remoteName)
+	}
+
+	branch := getCurrentBranch()
+	authHeader := authHeaderForPlatformName(mirrorPlatform)
+	fmt.Printf("  pushing to %s...", mirrorPlatform)
+	if err := runPushUpstreamWithAuth(remoteName, branch, authHeader); err != nil {
+		fmt.Printf("\n  push failed: %v\n", err)
+	} else {
+		fmt.Printf("\n  ✓ pushed\n")
+	}
+
+	proj.mirrors = append(proj.mirrors, mirrorPlatform)
+	if proj.primary == "" {
+		proj.primary = primary
+	}
+	if err := saveProjectConfig(proj); err != nil {
+		fmt.Printf("  warning: could not update .commitdog: %v\n", err)
+	} else {
+		fmt.Printf("  ✓ .commitdog updated\n\n")
+	}
 }

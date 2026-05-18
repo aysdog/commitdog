@@ -186,6 +186,7 @@ func runRelease() {
 		fatal("not a git repository.")
 	}
 
+	releaseAll := false
 	if len(os.Args) > 2 {
 		switch os.Args[2] {
 		case "--changelog-only":
@@ -196,6 +197,8 @@ func runRelease() {
 		case "config":
 			runReleaseConfig()
 			return
+		case "--all":
+			releaseAll = true
 		}
 	}
 
@@ -401,9 +404,40 @@ func runRelease() {
 
 	releaseURL := platformRelease(cfg, platform, owner, repo, nextVer, changelog, isGo, binaries, &undos)
 
+	if releaseAll {
+		proj2 = loadProjectConfig()
+		for _, mirror := range proj2.mirrors {
+			mirrorRemote := platformRemoteName(mirror)
+			mirrorAuth := authHeaderForPlatformName(mirror)
+			printStepOrRollback("pushing tags to "+mirror+"...", &undos, func() error {
+				return runPushTagsWithAuth(mirrorRemote, "main", mirrorAuth)
+			}, nil)
+			mirrorOwner, mirrorRepo := getMirrorOwnerRepo(mirrorRemote)
+			if mirrorOwner != "" && mirrorRepo != "" {
+				mirrorURL := platformRelease(cfg, mirror, mirrorOwner, mirrorRepo, nextVer, changelog, isGo, binaries, &undos)
+				fmt.Printf("  %s\n", mirrorURL)
+			}
+		}
+	}
+
+	for _, bin := range binaries {
+		os.Remove(bin)
+	}
+	os.Remove("checksums.txt")
+
 	fmt.Println()
 	fmt.Printf("  \033[32m✓ v%s released\033[0m\n", nextVer)
 	fmt.Printf("  %s\n\n", releaseURL)
+}
+
+func getMirrorOwnerRepo(remote string) (string, string) {
+	cmd := exec.Command("git", "remote", "get-url", remote)
+	var out strings.Builder
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return "", ""
+	}
+	return parseRemoteOwnerAndName(strings.TrimSpace(out.String()))
 }
 
 func printStepOrRollback(label string, undos *[]undoStep, fn func() error, undo func() error) {
@@ -602,14 +636,10 @@ func releaseGitHub(token, owner, repo, nextVer, changelog string, isGo bool, bin
 				return uploadReleaseAsset(token, uploadURL, b)
 			}, nil)
 		}
-		for _, bin := range binaries {
-			os.Remove(bin)
-		}
 		if checksumFile != "" {
 			printStepOrRollback("uploading checksums.txt...", undos, func() error {
 				return uploadReleaseAsset(token, uploadURL, checksumFile)
 			}, nil)
-			os.Remove(checksumFile)
 		}
 	}
 
@@ -653,12 +683,6 @@ func releaseGitLab(cfg config, token, owner, repo, nextVer, changelog string, is
 				return addGitLabReleaseLink(token, host, projectID, nextVer, filepath.Base(b), pkgURL)
 			}, nil)
 		}
-		for _, bin := range binaries {
-			os.Remove(bin)
-		}
-		if checksumFile != "" {
-			os.Remove(checksumFile)
-		}
 	}
 
 	return fmt.Sprintf("%s/%s/%s/-/releases/v%s", host, owner, repo, nextVer)
@@ -695,12 +719,6 @@ func releaseGitea(token, host, owner, repo, nextVer, changelog string, isGo bool
 		printStepOrRollback("uploading assets...", undos, func() error {
 			return uploadGiteaAssetsBatched(token, host, owner, repo, releaseID, toUpload)
 		}, nil)
-		for _, bin := range binaries {
-			os.Remove(bin)
-		}
-		if checksumFile != "" {
-			os.Remove(checksumFile)
-		}
 	}
 
 	return fmt.Sprintf("%s/%s/%s/releases/tag/v%s", host, owner, repo, nextVer)
@@ -737,12 +755,6 @@ func releaseForgejo(token, host, owner, repo, nextVer, changelog string, isGo bo
 		printStepOrRollback("uploading assets...", undos, func() error {
 			return uploadForgejoAssetsBatched(token, host, owner, repo, releaseID, toUpload)
 		}, nil)
-		for _, bin := range binaries {
-			os.Remove(bin)
-		}
-		if checksumFile != "" {
-			os.Remove(checksumFile)
-		}
 	}
 
 	return fmt.Sprintf("%s/%s/%s/releases/tag/v%s", host, owner, repo, nextVer)

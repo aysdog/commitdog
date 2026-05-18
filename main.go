@@ -61,8 +61,21 @@ func main() {
 		case "updateaur":
 			runUpdateAUR()
 			os.Exit(0)
+		case "-gh":
+			runCommitFlow(os.Args[2:], "github")
+			os.Exit(0)
+		case "-gl":
+			runCommitFlow(os.Args[2:], "gitlab")
+			os.Exit(0)
+		case "-gt":
+			runCommitFlow(os.Args[2:], "gitea")
+			os.Exit(0)
+		case "-fg":
+			runCommitFlow(os.Args[2:], "forgejo")
+			os.Exit(0)
 		default:
-			runCommitFlow(os.Args[1:])
+			platform, files := parsePlatformFlag(os.Args[1:])
+			runCommitFlow(files, platform)
 			os.Exit(0)
 		}
 	}
@@ -73,10 +86,30 @@ func main() {
 		fatal("not a git repository. run 'commitdog init' to create one.")
 	}
 
-	runCommitFlow(nil)
+	runCommitFlow(nil, "")
 }
 
-func runCommitFlow(files []string) {
+func parsePlatformFlag(args []string) (string, []string) {
+	var platform string
+	var rest []string
+	for _, arg := range args {
+		switch arg {
+		case "-gh":
+			platform = "github"
+		case "-gl":
+			platform = "gitlab"
+		case "-gt":
+			platform = "gitea"
+		case "-fg":
+			platform = "forgejo"
+		default:
+			rest = append(rest, arg)
+		}
+	}
+	return platform, rest
+}
+
+func runCommitFlow(files []string, platform string) {
 	if err := verifyGitRepo(); err != nil {
 		fatal("not a git repository. run 'commitdog init' to create one.")
 	}
@@ -149,7 +182,7 @@ func runCommitFlow(files []string) {
 
 	fmt.Printf("\n  ✓ committed: %s\n", chosen)
 
-	askPush()
+	askPush(platform)
 }
 
 func printHelp() {
@@ -158,6 +191,7 @@ func printHelp() {
 usage:
   commitdog                 stage all changes and generate commit message
   commitdog <file>          stage specific file and generate commit message
+  commitdog -gl/-gt/-fg     commit and push to gitlab / gitea / forgejo
 
   commitdog init            create a new GitHub repo and first push
   commitdog setup           configure email and GitHub token

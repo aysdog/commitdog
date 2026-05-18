@@ -195,16 +195,6 @@ func buildBrief(a analysis) string {
 	return ""
 }
 
-func inferHTMLType(a analysis) string {
-	if len(a.htmlElements) > 0 {
-		return "feat"
-	}
-	if len(a.detectedVersions) > 0 {
-		return "chore"
-	}
-	return "chore"
-}
-
 func buildFallback(a analysis) string {
 	if a.primaryScope != "" {
 		return fmt.Sprintf("%s: update %s", a.commitType, a.primaryScope)

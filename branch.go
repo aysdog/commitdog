@@ -65,7 +65,8 @@ func runBranchMenu() {
 }
 
 func runBranchSwitch() {
-	all, err := getAllBranches()
+	pruneRemoteRefs()
+	all, err := getLocalBranches()
 	if err != nil {
 		fatal("could not list branches: %v", err)
 	}
@@ -315,7 +316,8 @@ func isLocalOnly(b string) bool {
 }
 
 func runBranchDelete() {
-	all, err := getAllBranches()
+	pruneRemoteRefs()
+	all, err := getLocalBranches()
 	if err != nil {
 		fatal("could not list branches: %v", err)
 	}
@@ -428,7 +430,7 @@ func runBranchDelete() {
 			if confirm == "y" || confirm == "yes" {
 				fmt.Printf("  deleting remote branch...")
 				if err := gitDeleteRemoteBranch(remotes[0], b); err != nil {
-					fmt.Printf("\n  remote delete failed: %v\n", err)
+					fmt.Printf("\n  could not reach remote — deleted locally only.\n")
 				} else {
 					fmt.Printf("\n  ✓ deleted %s/%s\n", remotes[0], b)
 				}
@@ -504,6 +506,38 @@ func gitDeleteRemoteBranch(remote, branch string) error {
 	}
 	return nil
 }
+func getLocalBranches() ([]string, error) {
+	cmd := exec.Command("git", "branch", "--no-color", "--format=%(refname:short)")
+	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
+	}
+
+	current := getCurrentBranch()
+	var branches []string
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		b := strings.TrimSpace(line)
+		if b == "" {
+			continue
+		}
+		if b == current {
+			branches = append([]string{b}, branches...)
+		} else {
+			branches = append(branches, b)
+		}
+	}
+	return branches, nil
+}
+
+func pruneRemoteRefs() {
+	cmd := exec.Command("git", "remote", "prune", "origin")
+	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
+	cmd.Run()
+}
+
 func getAllBranches() ([]string, error) {
 	cmd := exec.Command("git", "branch", "-a", "--no-color", "--format=%(refname:short)")
 	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")

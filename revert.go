@@ -132,7 +132,7 @@ func runRevert() {
 	}
 
 	fmt.Printf("\n  ✓ reverted %s\n", chosen[:7])
-	askPush()
+	askPush("")
 }
 
 func pickCommit(commits []commitEntry) (string, bool) {
@@ -211,7 +211,7 @@ func handleRevertInProgress() {
 				os.Exit(1)
 			}
 			fmt.Println("\n  ✓ revert completed")
-			askPush()
+			askPush("")
 			return
 		case "a", "abort":
 			if err := gitRevertAbort(); err != nil {

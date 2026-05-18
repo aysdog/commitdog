@@ -129,7 +129,7 @@ func doMerge(s mergeBranch, into string) {
 			}
 			fmt.Println(" done")
 			fmt.Printf("  ✓ merged %s into %s\n", s.name, into)
-			askPush()
+			askPush("")
 			return
 		case "2":
 			showMergeDiff(s.name, into)

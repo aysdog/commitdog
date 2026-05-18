@@ -75,10 +75,13 @@ func editMessage(suggestion string) string {
 	return cleaned
 }
 
-func askPush() {
-	remotes := getRemotes()
-	if len(remotes) == 0 {
-		return
+func askPush(platform string) {
+	proj := loadProjectConfig()
+	if platform == "" {
+		platform = proj.effectivePrimary()
+	}
+	if platform == "" {
+		platform = "github"
 	}
 
 	branch := getCurrentBranch()
@@ -86,7 +89,21 @@ func askPush() {
 		return
 	}
 
-	remote := remotes[0]
+	remote := platformRemoteName(platform)
+	remotes := getRemotes()
+	found := false
+	for _, r := range remotes {
+		if r == remote {
+			found = true
+			break
+		}
+	}
+	if !found {
+		if len(remotes) == 0 {
+			return
+		}
+		remote = remotes[0]
+	}
 
 	fmt.Printf("\n  push to %s/%s? [Y/n] › ", remote, branch)
 
@@ -95,7 +112,7 @@ func askPush() {
 		switch input {
 		case "y", "yes", "":
 			fmt.Printf("  pushing...")
-			authHeader := currentAuthHeader()
+			authHeader := authHeaderForPlatformName(platform)
 			var err error
 			if !hasUpstream(branch) {
 				err = runPushUpstreamWithAuth(remote, branch, authHeader)

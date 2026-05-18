@@ -9,7 +9,16 @@ import (
 type projectConfig struct {
 	configured bool
 	platform   string
+	primary    string
+	mirrors    []string
 	targets    []string
+}
+
+func (p projectConfig) effectivePrimary() string {
+	if p.primary != "" {
+		return p.primary
+	}
+	return p.platform
 }
 
 type buildTarget struct {
@@ -56,6 +65,17 @@ func loadProjectConfig() projectConfig {
 			cfg.configured = val == "true"
 		case "platform":
 			cfg.platform = val
+		case "primary":
+			cfg.primary = val
+		case "mirrors":
+			inner := strings.TrimPrefix(val, "[")
+			inner = strings.TrimSuffix(inner, "]")
+			for _, part := range strings.Split(inner, ",") {
+				m := strings.Trim(strings.TrimSpace(part), "\"")
+				if m != "" {
+					cfg.mirrors = append(cfg.mirrors, m)
+				}
+			}
 		case "targets":
 			inner := strings.TrimPrefix(val, "[")
 			inner = strings.TrimSuffix(inner, "]")
@@ -78,8 +98,16 @@ func saveProjectConfig(cfg projectConfig) error {
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("configured = %v\n", cfg.configured))
-	if cfg.platform != "" {
-		sb.WriteString(fmt.Sprintf("platform = \"%s\"\n", cfg.platform))
+	primary := cfg.effectivePrimary()
+	if primary != "" {
+		sb.WriteString(fmt.Sprintf("primary = \"%s\"\n", primary))
+	}
+	if len(cfg.mirrors) > 0 {
+		mirrorQuoted := make([]string, len(cfg.mirrors))
+		for i, m := range cfg.mirrors {
+			mirrorQuoted[i] = "\"" + m + "\""
+		}
+		sb.WriteString(fmt.Sprintf("mirrors = [%s]\n", strings.Join(mirrorQuoted, ", ")))
 	}
 	if len(cfg.targets) > 0 {
 		sb.WriteString(fmt.Sprintf("targets = [%s]\n", strings.Join(quoted, ", ")))
