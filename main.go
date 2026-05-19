@@ -155,7 +155,7 @@ func runCommitFlow(files []string, platform string) {
 		if targetPlatform == "" {
 			targetPlatform = "github"
 		}
-		remote := platformRemoteName(targetPlatform)
+		remote := remoteForPlatform(targetPlatform)
 		branch := getCurrentBranch()
 		if hasUnpushedCommits(remote, branch) {
 			fmt.Printf("  nothing to commit — pushing unpushed commits to %s...\n", targetPlatform)

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -311,14 +312,45 @@ func changePrimaryPlatform(proj projectConfig) {
 			fmt.Println("  cancelled.")
 			return
 		}
-		for i, p := range all {
+		for i, newPrimary := range all {
 			if input == fmt.Sprintf("%d", i+1) {
-				proj.primary = p
-				proj.platform = p
+				oldPrimary := proj.effectivePrimary()
+				proj.primary = newPrimary
+				proj.platform = newPrimary
+				if oldPrimary != "" && oldPrimary != newPrimary {
+					alreadyMirror := false
+					for _, m := range proj.mirrors {
+						if m == oldPrimary {
+							alreadyMirror = true
+							break
+						}
+					}
+					if !alreadyMirror {
+						proj.mirrors = append(proj.mirrors, oldPrimary)
+					}
+				}
+				var filtered []string
+				for _, m := range proj.mirrors {
+					if m != newPrimary {
+						filtered = append(filtered, m)
+					}
+				}
+				proj.mirrors = filtered
 				if err := saveProjectConfig(proj); err != nil {
 					fatal("could not update .commitdog: %v", err)
 				}
-				fmt.Printf("  ✓ primary platform changed to %s\n\n", p)
+				newRemote := platformRemoteName(newPrimary)
+				if newRemote != "origin" && remoteExists(newRemote) {
+					cmd := exec.Command("git", "remote", "get-url", newRemote)
+					var out strings.Builder
+					cmd.Stdout = &out
+					if err := cmd.Run(); err == nil {
+						newURL := strings.TrimSpace(out.String())
+						exec.Command("git", "remote", "set-url", "origin", newURL).Run()
+						fmt.Printf("  ✓ origin updated to %s\n", newURL)
+					}
+				}
+				fmt.Printf("  ✓ primary platform changed to %s\n\n", newPrimary)
 				return
 			}
 		}

@@ -92,20 +92,27 @@ func askPush(platform string) {
 		return
 	}
 
-	remote := platformRemoteName(platform)
-	remotes := getRemotes()
-	found := false
-	for _, r := range remotes {
-		if r == remote {
-			found = true
-			break
-		}
-	}
-	if !found {
-		if len(remotes) == 0 {
+	remote := remoteForPlatform(platform)
+	if !remoteExists(remote) {
+		fmt.Println()
+		fmt.Printf("  remote '%s' not configured.\n\n", remote)
+		fmt.Println("  1  add remote now")
+		fmt.Println("  2  skip")
+		fmt.Println()
+		fmt.Printf("  [1/2] pick › ")
+		if strings.TrimSpace(readLine()) == "1" {
+			fmt.Printf("  remote URL › ")
+			url := strings.TrimSpace(readLine())
+			if url != "" {
+				if err := gitAddRemote(remote, url); err != nil {
+					fmt.Printf("  could not add remote: %v\n\n", err)
+					return
+				}
+				fmt.Printf("  ✓ remote '%s' added\n\n", remote)
+			}
+		} else {
 			return
 		}
-		remote = remotes[0]
 	}
 
 	fmt.Printf("\n  push to %s/%s? [Y/n] › ", remote, branch)
@@ -129,7 +136,50 @@ func askPush(platform string) {
 					offerRecovery(r)
 					return
 				}
-				fmt.Printf("\n  %s push failed: %s\n", colorRed("✗"), err)
+				proj := loadProjectConfig()
+				mirrors := proj.mirrors
+				errMsg := err.Error()
+				isPlatformError := strings.Contains(errMsg, "403") || strings.Contains(errMsg, "permission") || strings.Contains(errMsg, "not allowed") || strings.Contains(errMsg, "authentication") || strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "repository")
+				if len(mirrors) > 0 && isPlatformError {
+					fmt.Printf("  %s push to %s failed.\n\n", colorRed("✗"), remote)
+					fmt.Println("  1  push to mirror instead")
+					fmt.Println("  2  skip")
+					fmt.Println()
+					fmt.Printf("  [1/2] pick › ")
+					if strings.TrimSpace(readLine()) == "1" {
+						var availableMirrors []string
+						for _, m := range mirrors {
+							if remoteExists(platformRemoteName(m)) {
+								availableMirrors = append(availableMirrors, m)
+							}
+						}
+						if len(availableMirrors) == 0 {
+							fmt.Println("  no mirror remotes configured. run 'commitdog init' to add one.")
+							return
+						}
+						for i, m := range availableMirrors {
+							fmt.Printf("  %d  %s\n", i+1, m)
+						}
+						fmt.Println()
+						fmt.Printf("  [1-%d] pick › ", len(availableMirrors))
+						input := strings.TrimSpace(readLine())
+						for i, m := range availableMirrors {
+							if input == fmt.Sprintf("%d", i+1) {
+								mirrorRemote := platformRemoteName(m)
+								mirrorAuth := authHeaderForPlatformName(m)
+								fmt.Printf("  pushing to %s...\n", m)
+								if merr := runPushWithAuth(mirrorRemote, branch, mirrorAuth); merr != nil {
+									fmt.Printf("  %s push to %s failed: %s\n", colorRed("✗"), m, merr)
+								} else {
+									fmt.Printf("  %s pushed to %s/%s\n", colorGreen("✓"), mirrorRemote, branch)
+								}
+								break
+							}
+						}
+					}
+				} else {
+					fmt.Printf("  %s push failed: %s\n", colorRed("✗"), err)
+				}
 			} else {
 				fmt.Printf("\n  %s pushed to %s/%s\n", colorGreen("✓"), remote, branch)
 			}

@@ -102,9 +102,15 @@ func saveProjectConfig(cfg projectConfig) error {
 	if primary != "" {
 		sb.WriteString(fmt.Sprintf("primary = \"%s\"\n", primary))
 	}
-	if len(cfg.mirrors) > 0 {
-		mirrorQuoted := make([]string, len(cfg.mirrors))
-		for i, m := range cfg.mirrors {
+	var cleanMirrors []string
+	for _, m := range cfg.mirrors {
+		if m != primary {
+			cleanMirrors = append(cleanMirrors, m)
+		}
+	}
+	if len(cleanMirrors) > 0 {
+		mirrorQuoted := make([]string, len(cleanMirrors))
+		for i, m := range cleanMirrors {
 			mirrorQuoted[i] = "\"" + m + "\""
 		}
 		sb.WriteString(fmt.Sprintf("mirrors = [%s]\n", strings.Join(mirrorQuoted, ", ")))

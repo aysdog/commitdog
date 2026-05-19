@@ -187,9 +187,10 @@ func runRelease() {
 	}
 
 	releaseAll := false
-	if len(os.Args) > 2 {
-		switch os.Args[2] {
-		case "--changelog-only":
+	mirrorOnly := ""
+	for _, arg := range os.Args[2:] {
+		switch arg {
+		case "--changelog-only", "-changelog-only":
 			cl := buildChangelog(getLatestGitTag())
 			fmt.Println()
 			fmt.Println(cl)
@@ -197,14 +198,28 @@ func runRelease() {
 		case "config":
 			runReleaseConfig()
 			return
-		case "--all":
+		case "--all", "-all":
 			releaseAll = true
+		case "-gh":
+			mirrorOnly = "github"
+		case "-gl":
+			mirrorOnly = "gitlab"
+		case "-gt":
+			mirrorOnly = "gitea"
+		case "-fg":
+			mirrorOnly = "forgejo"
 		}
 	}
 
 	cfg := loadConfig()
 	proj2 := loadProjectConfig()
-	platform := proj2.platform
+
+	if mirrorOnly != "" {
+		runMirrorRelease(cfg, proj2, mirrorOnly)
+		return
+	}
+
+	platform := proj2.effectivePrimary()
 	if platform == "" {
 		platform = "github"
 	}
@@ -212,6 +227,7 @@ func runRelease() {
 	if token == "" {
 		fatal("no %s token found. run 'commitdog setup' first.", platform)
 	}
+	_ = proj2
 
 	owner, repo := getRepoOwnerAndName()
 	if owner == "" || repo == "" {
@@ -778,4 +794,82 @@ func fetchTags() error {
 		return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
 	}
 	return nil
+}
+
+func runMirrorRelease(cfg config, proj projectConfig, platform string) {
+	token := tokenForPlatform(cfg, platform)
+	if token == "" {
+		fatal("no %s token found. run 'commitdog setup' first.", platform)
+	}
+
+	gitTag := getLatestGitTag()
+	if gitTag == "" {
+		fatal("no git tag found. run 'commitdog release' first to create a release.")
+	}
+
+	remote := platformRemoteName(platform)
+	if !remoteExists(remote) {
+		fatal("remote '%s' not configured. run 'commitdog init' to add %s as a mirror.", remote, platform)
+	}
+
+	fmt.Println()
+	fmt.Printf("  publishing v%s to %s\n\n", gitTag, platform)
+
+	authHeader := authHeaderForPlatformName(platform)
+	printStepOrRollback("pushing tags to "+platform+"...", nil, func() error {
+		return runPushTagsWithAuth(remote, getCurrentBranch(), authHeader)
+	}, nil)
+
+	owner, repo := getMirrorOwnerRepo(remote)
+	if owner == "" || repo == "" {
+		fatal("could not detect repo owner and name from remote '%s'.", remote)
+	}
+
+	changelog := buildChangelog(gitTag)
+
+	proj2 := loadProjectConfig()
+	isGo := false
+	if p, _ := detectProject(); p != nil && p.lang == "Go" {
+		isGo = true
+	}
+
+	var binaries []string
+	if isGo {
+		targets := resolveTargets(proj2.targets)
+		if len(targets) == 0 {
+			targets = allBuildTargets
+		}
+		for _, t := range targets {
+			name := fmt.Sprintf("%s-%s-%s%s", repo, t.goos, t.goarch, t.suffix)
+			label := fmt.Sprintf("building %s/%s...", t.goos, t.goarch)
+			goos, goarch, n := t.goos, t.goarch, name
+			var undos []undoStep
+			printStepOrRollback(label, &undos, func() error {
+				cmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", n, ".")
+				cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch)
+				var stderr bytes.Buffer
+				cmd.Stderr = &stderr
+				if err := cmd.Run(); err != nil {
+					return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
+				}
+				return nil
+			}, func() error {
+				os.Remove(n)
+				return nil
+			})
+			binaries = append(binaries, name)
+		}
+	}
+
+	var undos []undoStep
+	releaseURL := platformRelease(cfg, platform, owner, repo, gitTag, changelog, isGo, binaries, &undos)
+
+	for _, bin := range binaries {
+		os.Remove(bin)
+	}
+	os.Remove("checksums.txt")
+
+	fmt.Println()
+	fmt.Printf("  \033[32m✓ v%s published to %s\033[0m\n", gitTag, platform)
+	fmt.Printf("  %s\n\n", releaseURL)
 }

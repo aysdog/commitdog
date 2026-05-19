@@ -344,10 +344,23 @@ func runPushTagsWithAuth(remote, branch, authHeader string) error {
 }
 
 func platformRemoteName(platform string) string {
+	return platform
+}
+
+func primaryRemoteName(platform string) string {
 	if platform == "github" || platform == "" {
 		return "origin"
 	}
 	return platform
+}
+
+func remoteForPlatform(platform string) string {
+	proj := loadProjectConfig()
+	primary := proj.effectivePrimary()
+	if platform == "" || platform == primary {
+		return primaryRemoteName(primary)
+	}
+	return platformRemoteName(platform)
 }
 
 func authHeaderForPlatformName(platform string) string {
@@ -380,4 +393,13 @@ func hasUnpushedCommits(remote, branch string) bool {
 		return false
 	}
 	return strings.TrimSpace(out.String()) != ""
+}
+
+func remoteExists(name string) bool {
+	for _, r := range getRemotes() {
+		if r == name {
+			return true
+		}
+	}
+	return false
 }
