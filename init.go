@@ -462,7 +462,24 @@ func addMirrorPlatform(proj projectConfig, c config) {
 			fmt.Printf("  [1/2/3] pick › ")
 			switch strings.TrimSpace(readLine()) {
 			case "1":
-				remoteURL = buildMirrorURL(c, mirrorPlatform, username, currentRepo)
+				fmt.Printf("  fetching repo details from %s...", mirrorPlatform)
+				fetched, ferr := platformCreateRepo(c, mirrorPlatform, username, username, currentRepo, private)
+				if ferr == nil && fetched.HTMLURL != "" {
+					fmt.Println()
+					fmt.Printf("  found: %s\n", fetched.HTMLURL)
+					fmt.Printf("  use this repo? [Y/n] › ")
+					if ans := strings.ToLower(strings.TrimSpace(readLine())); ans != "n" && ans != "no" {
+						remoteURL = fetched.SSHURL
+						if !hasSSHKey(sshHostForPlatform(c, mirrorPlatform)) {
+							remoteURL = strings.TrimSuffix(fetched.HTMLURL, ".git") + ".git"
+						}
+					} else {
+						remoteURL = buildMirrorURL(c, mirrorPlatform, username, currentRepo)
+					}
+				} else {
+					fmt.Println()
+					remoteURL = buildMirrorURL(c, mirrorPlatform, username, currentRepo)
+				}
 				fmt.Printf("  using %s\n\n", remoteURL)
 			case "2":
 				fmt.Printf("  new repo name › ")

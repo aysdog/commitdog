@@ -28,6 +28,9 @@ func main() {
 		case "--update", "update":
 			runUpdate()
 			os.Exit(0)
+		case "--uninstall":
+			runUninstall()
+			os.Exit(0)
 		case "branch":
 			runBranch()
 			os.Exit(0)
@@ -207,6 +210,7 @@ usage:
   commitdog                 stage all changes and generate commit message
   commitdog <file>          stage specific file and generate commit message
   commitdog -gl/-gt/-fg     commit and push to gitlab / gitea / forgejo
+  commitdog --uninstall     remove commitdog from this device completely
 
   commitdog init            create a new GitHub repo and first push
   commitdog setup           configure email and GitHub token
