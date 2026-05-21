@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -269,8 +270,214 @@ func detectActualRemote() string {
 	return ""
 }
 
-func autoFixRemoteName(correct string) error {
-	fmt.Printf("  updating remote references to use '%s'...\n", correct)
+func getRemoteURL(remote string) string {
+	cmd := exec.Command("git", "remote", "get-url", remote)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out.String())
+}
+
+func repoNameFromURL(rawURL string) string {
+	rawURL = strings.TrimSuffix(rawURL, ".git")
+	if strings.Contains(rawURL, ":") && !strings.HasPrefix(rawURL, "http") {
+		parts := strings.Split(rawURL, ":")
+		if len(parts) == 2 {
+			segments := strings.Split(parts[1], "/")
+			return segments[len(segments)-1]
+		}
+	}
+	parts := strings.Split(rawURL, "/")
+	if len(parts) > 0 {
+		return parts[len(parts)-1]
+	}
+	return ""
+}
+
+func buildOriginURL(platform, repoName string, c config) (string, error) {
+	switch platform {
+	case "github":
+		username, err := getGitHubUsername(c.GitHub.Token)
+		if err != nil {
+			return "", err
+		}
+		return "https://github.com/" + username + "/" + repoName + ".git", nil
+	case "gitlab":
+		host := strings.TrimRight(c.GitLab.Host, "/")
+		if host == "" {
+			host = "https://gitlab.com"
+		}
+		username, err := getGitLabUsername(c.GitLab.Token, host)
+		if err != nil {
+			return "", err
+		}
+		return host + "/" + username + "/" + repoName + ".git", nil
+	case "gitea":
+		host := strings.TrimRight(c.Gitea.Host, "/")
+		username, err := getGiteaUsername(c.Gitea.Token, host)
+		if err != nil {
+			return "", err
+		}
+		return host + "/" + username + "/" + repoName + ".git", nil
+	case "forgejo":
+		host := strings.TrimRight(c.Forgejo.Host, "/")
+		username, err := getForgejoUsername(c.Forgejo.Token, host)
+		if err != nil {
+			return "", err
+		}
+		return host + "/" + username + "/" + repoName + ".git", nil
+	}
+	return "", fmt.Errorf("unknown platform: %s", platform)
+}
+
+func fetchRepoCloneURL(platform, repoName string, c config) (string, error) {
+	switch platform {
+	case "github":
+		username, err := getGitHubUsername(c.GitHub.Token)
+		if err != nil {
+			return "", err
+		}
+		body, err := githubRequest("GET", "/repos/"+username+"/"+repoName, c.GitHub.Token, nil)
+		if err != nil {
+			return "", err
+		}
+		var r struct {
+			CloneURL string `json:"clone_url"`
+		}
+		if err := json.Unmarshal(body, &r); err != nil {
+			return "", err
+		}
+		return r.CloneURL, nil
+	case "gitlab":
+		host := c.GitLab.Host
+		if host == "" {
+			host = "https://gitlab.com"
+		}
+		username, err := getGitLabUsername(c.GitLab.Token, host)
+		if err != nil {
+			return "", err
+		}
+		body, err := gitlabRequest("GET", "/projects/"+username+"%2F"+repoName, c.GitLab.Token, host, nil)
+		if err != nil {
+			return "", err
+		}
+		var r struct {
+			HTTPURLToRepo string `json:"http_url_to_repo"`
+		}
+		if err := json.Unmarshal(body, &r); err != nil {
+			return "", err
+		}
+		return r.HTTPURLToRepo, nil
+	case "gitea":
+		username, err := getGiteaUsername(c.Gitea.Token, c.Gitea.Host)
+		if err != nil {
+			return "", err
+		}
+		body, err := giteaRequest("GET", "/repos/"+username+"/"+repoName, c.Gitea.Token, c.Gitea.Host, nil)
+		if err != nil {
+			return "", err
+		}
+		var r struct {
+			CloneURL string `json:"clone_url"`
+		}
+		if err := json.Unmarshal(body, &r); err != nil {
+			return "", err
+		}
+		return r.CloneURL, nil
+	case "forgejo":
+		username, err := getForgejoUsername(c.Forgejo.Token, c.Forgejo.Host)
+		if err != nil {
+			return "", err
+		}
+		body, err := forgejoRequest("GET", "/repos/"+username+"/"+repoName, c.Forgejo.Token, c.Forgejo.Host, nil)
+		if err != nil {
+			return "", err
+		}
+		var r struct {
+			CloneURL string `json:"clone_url"`
+		}
+		if err := json.Unmarshal(body, &r); err != nil {
+			return "", err
+		}
+		return r.CloneURL, nil
+	}
+	return "", fmt.Errorf("unknown platform: %s", platform)
+}
+
+func autoFixRemoteName(detected string) error {
+	detectedURL := getRemoteURL(detected)
+	if detectedURL == "" {
+		return fmt.Errorf("could not get URL for remote '%s'", detected)
+	}
+
+	repoName := repoNameFromURL(detectedURL)
+	if repoName == "" {
+		return fmt.Errorf("could not extract repo name from: %s", detectedURL)
+	}
+
+	fmt.Println()
+	fmt.Printf("  %s  connecting origin to an existing repo\n\n", colorYellow("⚠"))
+	fmt.Printf("  found repo '%s' on %s\n\n", repoName, detected)
+	fmt.Println("  before you continue, understand what this does:")
+	fmt.Println()
+	fmt.Println("  · origin will point to '" + repoName + "' on " + detected)
+	fmt.Println("  · every future push from this machine goes to that repo")
+	fmt.Println("  · if this is the wrong repo, you could push your code into someone else's project")
+	fmt.Println("  · if the remote has different history, a force push could permanently delete commits")
+	fmt.Println("  · this cannot be undone automatically — you would need to fix remotes manually")
+	fmt.Println()
+	fmt.Printf("  type 'y' to connect origin to '%s', or 'n' to cancel › ", repoName)
+
+	for {
+		input := strings.ToLower(strings.TrimSpace(readLine()))
+		if input == "y" || input == "yes" {
+			break
+		}
+		if input == "n" || input == "no" {
+			fmt.Println()
+			return fmt.Errorf("cancelled")
+		}
+		fmt.Printf("  type 'y' or 'n' › ")
+	}
+
+	fmt.Println()
+
+	c := loadConfig()
+	expectedURL, err := buildOriginURL(detected, repoName, c)
+
+	var finalURL string
+	switch {
+	case err != nil || expectedURL == "":
+		finalURL, err = fetchRepoCloneURL(detected, repoName, c)
+		if err != nil {
+			return fmt.Errorf("could not resolve repo URL: %s", err)
+		}
+	case expectedURL != detectedURL:
+		fmt.Printf("  %s URL mismatch — using stored config URL\n\n", colorYellow("⚠"))
+		finalURL = expectedURL
+	default:
+		finalURL = detectedURL
+	}
+
+	var setErr bytes.Buffer
+	checkCmd := exec.Command("git", "remote", "get-url", "origin")
+	if err := checkCmd.Run(); err != nil {
+		addCmd := exec.Command("git", "remote", "add", "origin", finalURL)
+		addCmd.Stderr = &setErr
+		if err := addCmd.Run(); err != nil {
+			return fmt.Errorf("failed to add origin: %s", strings.TrimSpace(setErr.String()))
+		}
+	} else {
+		setCmd := exec.Command("git", "remote", "set-url", "origin", finalURL)
+		setCmd.Stderr = &setErr
+		if err := setCmd.Run(); err != nil {
+			return fmt.Errorf("failed to update origin: %s", strings.TrimSpace(setErr.String()))
+		}
+	}
+
+	fmt.Printf("  %s origin → %s\n", colorGreen("✓"), finalURL)
 	return nil
 }
 
@@ -299,8 +506,4 @@ func extractTagFromError(stderr string) string {
 		}
 	}
 	return "unknown"
-}
-
-func colorGreen(s string) string {
-	return "\033[32m" + s + "\033[0m"
 }

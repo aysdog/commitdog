@@ -242,8 +242,8 @@ usage:
   commitdog release config    configure build targets
 
   commitdog --update        update to latest version
-  commitdog --version       show version and logo
-  commitdog --help          show this help
+  commitdog version         show version and logo
+  commitdog help            show this help
 
 workflow:
   first time:

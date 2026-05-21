@@ -439,15 +439,3 @@ func subjectForHash(hash string, commits []commitEntry) string {
 	}
 	return ""
 }
-
-func colorRed(s string) string {
-	return "\033[31m" + s + "\033[0m"
-}
-
-func colorDim(s string) string {
-	return "\033[2m" + s + "\033[0m"
-}
-
-func colorMuted(s string) string {
-	return "\033[90m" + s + "\033[0m"
-}

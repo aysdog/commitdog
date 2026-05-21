@@ -603,7 +603,3 @@ func gitCheckoutNewBranch(name, base string) error {
 	}
 	return nil
 }
-
-func colorYellow(s string) string {
-	return "\033[33m" + s + "\033[0m"
-}
