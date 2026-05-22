@@ -281,15 +281,30 @@ func handleConfiguredRepo(proj projectConfig, c config) {
 	fmt.Println()
 	fmt.Println("  1  change platform")
 	fmt.Println("  2  add mirror")
-	fmt.Println("  3  cancel")
-	fmt.Println()
-	fmt.Printf("  [1/2/3] pick › ")
+	if len(proj.mirrors) > 0 {
+		fmt.Println("  3  remove mirror")
+		fmt.Println("  4  cancel")
+		fmt.Println()
+		fmt.Printf("  [1/2/3/4] pick › ")
+	} else {
+		fmt.Println("  3  cancel")
+		fmt.Println()
+		fmt.Printf("  [1/2/3] pick › ")
+	}
 
 	switch strings.TrimSpace(readLine()) {
 	case "1":
 		changePrimaryPlatform(proj)
 	case "2":
 		addMirrorPlatform(proj, c)
+	case "3":
+		if len(proj.mirrors) > 0 {
+			removeMirrorPlatform(proj)
+		} else {
+			fmt.Println("  cancelled.")
+		}
+	case "4":
+		fmt.Println("  cancelled.")
 	default:
 		fmt.Println("  cancelled.")
 	}
@@ -553,5 +568,88 @@ func buildMirrorURL(c config, platform, username, repo string) string {
 		return strings.TrimRight(c.Forgejo.Host, "/") + "/" + username + "/" + repo + ".git"
 	default:
 		return "https://github.com/" + username + "/" + repo + ".git"
+	}
+}
+
+func removeMirrorPlatform(proj projectConfig) {
+	fmt.Println()
+	fmt.Println("  remove which mirror?")
+	fmt.Println()
+	for i, m := range proj.mirrors {
+		fmt.Printf("  %d  %s\n", i+1, m)
+	}
+	fmt.Println()
+	fmt.Printf("  [1-%d] pick, [q] quit › ", len(proj.mirrors))
+
+	var target string
+	for {
+		input := strings.TrimSpace(readLine())
+		if input == "q" || input == "" {
+			fmt.Println("  cancelled.")
+			return
+		}
+		for i, m := range proj.mirrors {
+			if input == fmt.Sprintf("%d", i+1) {
+				target = m
+				break
+			}
+		}
+		if target != "" {
+			break
+		}
+		fmt.Printf("  1-%d or q › ", len(proj.mirrors))
+	}
+
+	fmt.Println()
+	fmt.Printf("  removing %s as a mirror\n\n", target)
+	fmt.Println("  this will:")
+	fmt.Println("  · remove the git remote from this repo")
+	fmt.Println("  · remove " + target + " from .commitdog")
+	fmt.Println("  · leave the repo on " + target + " untouched")
+	fmt.Println()
+	fmt.Printf("  type 'y' to confirm or 'n' to cancel › ")
+
+	for {
+		input := strings.ToLower(strings.TrimSpace(readLine()))
+		if input == "y" || input == "yes" {
+			break
+		}
+		if input == "n" || input == "no" {
+			fmt.Println("  cancelled.")
+			return
+		}
+		fmt.Printf("  type 'y' or 'n' › ")
+	}
+
+	fmt.Println()
+
+	remoteName := platformRemoteName(target)
+	repoURL := getRemoteURL(remoteName)
+
+	if remoteExists(remoteName) {
+		if err := exec.Command("git", "remote", "remove", remoteName).Run(); err != nil {
+			fmt.Printf("  %s could not remove remote '%s'\n", colorRed("✗"), remoteName)
+		} else {
+			fmt.Printf("  %s remote '%s' removed\n", colorGreen("✓"), remoteName)
+		}
+	}
+
+	var updated []string
+	for _, m := range proj.mirrors {
+		if m != target {
+			updated = append(updated, m)
+		}
+	}
+	proj.mirrors = updated
+	if err := saveProjectConfig(proj); err != nil {
+		fmt.Printf("  %s could not update .commitdog: %v\n", colorRed("✗"), err)
+		return
+	}
+	fmt.Printf("  %s .commitdog updated\n\n", colorGreen("✓"))
+
+	if repoURL != "" {
+		cleanURL := strings.TrimSuffix(repoURL, ".git")
+		fmt.Printf("  to delete the repo on %s:\n", target)
+		fmt.Printf("  → %s/settings\n\n", cleanURL)
 	}
 }

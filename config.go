@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -213,8 +214,9 @@ func runSetup() {
 	fmt.Println("  2  gitlab")
 	fmt.Println("  3  gitea")
 	fmt.Println("  4  forgejo")
+	fmt.Println("  5  remove a platform")
 	fmt.Println()
-	fmt.Printf("  [1/2/3/4] pick › ")
+	fmt.Printf("  [1/2/3/4/5] pick › ")
 
 	platform := ""
 	for {
@@ -227,8 +229,11 @@ func runSetup() {
 			platform = "gitea"
 		case "4":
 			platform = "forgejo"
+		case "5":
+			removePlatformFromConfig()
+			return
 		default:
-			fmt.Printf("  [1/2/3/4] pick › ")
+			fmt.Printf("  [1/2/3/4/5] pick › ")
 			continue
 		}
 		break
@@ -445,4 +450,151 @@ func sanitizeInput(s string) string {
 	s = strings.ReplaceAll(s, "\n", "")
 	s = strings.ReplaceAll(s, "\r", "")
 	return s
+}
+
+func removePlatformFromConfig() {
+	c := loadConfig()
+
+	var configured []string
+	if c.GitHub.Token != "" {
+		configured = append(configured, "github")
+	}
+	if c.GitLab.Token != "" {
+		configured = append(configured, "gitlab")
+	}
+	if c.Gitea.Token != "" {
+		configured = append(configured, "gitea")
+	}
+	if c.Forgejo.Token != "" {
+		configured = append(configured, "forgejo")
+	}
+
+	if len(configured) == 0 {
+		fmt.Println()
+		fmt.Println("  no platforms configured.")
+		fmt.Println()
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("  remove which platform?")
+	fmt.Println()
+	for i, p := range configured {
+		fmt.Printf("  %d  %s\n", i+1, p)
+	}
+	fmt.Println()
+	fmt.Printf("  [1-%d] pick, [q] quit › ", len(configured))
+
+	var target string
+	for {
+		input := strings.TrimSpace(readLine())
+		if input == "q" || input == "" {
+			fmt.Println("  cancelled.")
+			return
+		}
+		for i, p := range configured {
+			if input == fmt.Sprintf("%d", i+1) {
+				target = p
+				break
+			}
+		}
+		if target != "" {
+			break
+		}
+		fmt.Printf("  1-%d or q › ", len(configured))
+	}
+
+	proj := loadProjectConfig()
+	isPrimary := proj.effectivePrimary() == target
+
+	fmt.Println()
+	fmt.Printf("  %s removing %s\n\n", colorYellow("⚠"), target)
+	fmt.Println("  this will:")
+	fmt.Println("  · delete the token, host, and email for " + target + " from global config")
+	fmt.Println("  · remove the git remote for " + target + " from this repo")
+	fmt.Println("  · remove " + target + " from .commitdog in this repo")
+	if isPrimary {
+		fmt.Println("  · " + target + " is your primary — you will need to run 'commitdog init' again")
+	}
+	fmt.Println()
+	fmt.Printf("  type 'y' to confirm or 'n' to cancel › ")
+
+	for {
+		input := strings.ToLower(strings.TrimSpace(readLine()))
+		if input == "y" || input == "yes" {
+			break
+		}
+		if input == "n" || input == "no" {
+			fmt.Println("  cancelled.")
+			return
+		}
+		fmt.Printf("  type 'y' or 'n' › ")
+	}
+
+	fmt.Println()
+
+	switch target {
+	case "github":
+		c.GitHub = platformConfig{}
+	case "gitlab":
+		c.GitLab = platformConfig{}
+	case "gitea":
+		c.Gitea = platformConfig{}
+	case "forgejo":
+		c.Forgejo = platformConfig{}
+	}
+
+	if err := saveConfig(c); err != nil {
+		fmt.Printf("  %s could not save config: %v\n", colorRed("✗"), err)
+		return
+	}
+	fmt.Printf("  %s removed %s from global config\n", colorGreen("✓"), target)
+
+	remoteName := platformRemoteName(target)
+	if isPrimary {
+		remoteName = "origin"
+	}
+
+	if remoteExists(remoteName) {
+		exec.Command("git", "remote", "remove", remoteName).Run()
+		fmt.Printf("  %s remote '%s' removed\n", colorGreen("✓"), remoteName)
+	}
+
+	if isPrimary {
+		proj.primary = ""
+		proj.platform = ""
+		if err := saveProjectConfig(proj); err != nil {
+			fmt.Printf("  %s could not update .commitdog: %v\n", colorRed("✗"), err)
+		} else {
+			fmt.Printf("  %s .commitdog updated\n", colorGreen("✓"))
+		}
+		fmt.Println()
+		fmt.Printf("  %s %s was your primary — run 'commitdog init' to reconfigure\n\n", colorYellow("⚠"), target)
+		return
+	}
+
+	isMirror := false
+	for _, m := range proj.mirrors {
+		if m == target {
+			isMirror = true
+			break
+		}
+	}
+
+	if isMirror {
+		var updated []string
+		for _, m := range proj.mirrors {
+			if m != target {
+				updated = append(updated, m)
+			}
+		}
+		proj.mirrors = updated
+		if err := saveProjectConfig(proj); err != nil {
+			fmt.Printf("  %s could not update .commitdog: %v\n", colorRed("✗"), err)
+		} else {
+			fmt.Printf("  %s .commitdog updated\n", colorGreen("✓"))
+		}
+	}
+
+	fmt.Println()
 }
