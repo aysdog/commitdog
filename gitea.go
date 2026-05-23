@@ -209,3 +209,44 @@ func uploadGiteaAssetsBatched(token, host, owner, repo string, releaseID int64, 
 	}
 	return nil
 }
+
+func listGiteaPRs(token, host, owner, repo string) ([]prEntry, error) {
+	body, err := giteaRequest("GET", "/repos/"+owner+"/"+repo+"/pulls?state=open&limit=20", token, host, nil)
+	if err != nil {
+		return nil, err
+	}
+	var prs []prEntry
+	if err := json.Unmarshal(body, &prs); err != nil {
+		return nil, err
+	}
+	return prs, nil
+}
+
+func createGiteaPR(token, host, owner, repo, title, desc, head, base string) (prEntry, error) {
+	payload := map[string]string{
+		"title": title,
+		"body":  desc,
+		"head":  head,
+		"base":  base,
+	}
+	resp, err := giteaRequest("POST", "/repos/"+owner+"/"+repo+"/pulls", token, host, payload)
+	if err != nil {
+		return prEntry{}, err
+	}
+	var pr prEntry
+	if err := json.Unmarshal(resp, &pr); err != nil {
+		return prEntry{}, err
+	}
+	return pr, nil
+}
+
+func mergeGiteaPR(token, host, owner, repo string, number int, method string) error {
+	payload := map[string]string{"Do": method}
+	_, err := giteaRequest("POST", fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, number), token, host, payload)
+	return err
+}
+
+func deleteGiteaBranch(token, host, owner, repo, branch string) error {
+	_, err := giteaRequest("DELETE", "/repos/"+owner+"/"+repo+"/branches/"+branch, token, host, nil)
+	return err
+}

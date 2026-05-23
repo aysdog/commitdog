@@ -243,3 +243,79 @@ func addGitLabReleaseLink(token, host, projectID, tagName, name, url string) err
 	)
 	return err
 }
+
+type gitlabMREntry struct {
+	IID          int    `json:"iid"`
+	Title        string `json:"title"`
+	WebURL       string `json:"web_url"`
+	SourceBranch string `json:"source_branch"`
+	TargetBranch string `json:"target_branch"`
+	Author       struct {
+		Username string `json:"username"`
+	} `json:"author"`
+}
+
+func (m gitlabMREntry) toPREntry() prEntry {
+	p := prEntry{
+		Number:  m.IID,
+		Title:   m.Title,
+		HTMLURL: m.WebURL,
+	}
+	p.Head.Ref = m.SourceBranch
+	p.Base.Ref = m.TargetBranch
+	p.User.Login = m.Author.Username
+	return p
+}
+
+func listGitLabMRs(token, host, projectID string) ([]prEntry, error) {
+	body, err := gitlabRequest("GET", "/projects/"+projectID+"/merge_requests?state=opened&per_page=20", token, host, nil)
+	if err != nil {
+		return nil, err
+	}
+	var mrs []gitlabMREntry
+	if err := json.Unmarshal(body, &mrs); err != nil {
+		return nil, err
+	}
+	prs := make([]prEntry, len(mrs))
+	for i, m := range mrs {
+		prs[i] = m.toPREntry()
+	}
+	return prs, nil
+}
+
+func createGitLabMR(token, host, projectID, title, desc, source, target string) (prEntry, error) {
+	payload := map[string]string{
+		"source_branch": source,
+		"target_branch": target,
+		"title":         title,
+		"description":   desc,
+	}
+	resp, err := gitlabRequest("POST", "/projects/"+projectID+"/merge_requests", token, host, payload)
+	if err != nil {
+		return prEntry{}, err
+	}
+	var mr gitlabMREntry
+	if err := json.Unmarshal(resp, &mr); err != nil {
+		return prEntry{}, err
+	}
+	return mr.toPREntry(), nil
+}
+
+func mergeGitLabMR(token, host, projectID string, iid int, method string) error {
+	iidStr := fmt.Sprintf("%d", iid)
+	if method == "rebase" {
+		_, err := gitlabRequest("PUT", "/projects/"+projectID+"/merge_requests/"+iidStr+"/rebase", token, host, nil)
+		return err
+	}
+	payload := map[string]interface{}{}
+	if method == "squash" {
+		payload["squash"] = true
+	}
+	_, err := gitlabRequest("PUT", "/projects/"+projectID+"/merge_requests/"+iidStr+"/merge", token, host, payload)
+	return err
+}
+
+func deleteGitLabBranch(token, host, projectID, branch string) error {
+	_, err := gitlabRequest("DELETE", "/projects/"+projectID+"/repository/branches/"+branch, token, host, nil)
+	return err
+}
