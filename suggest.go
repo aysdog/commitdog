@@ -42,62 +42,74 @@ func withBody(subject string, a analysis) string {
 	return subject + "\n\n" + body
 }
 
+func safeUpdateVerb(name string) string {
+	reserved := map[string]bool{
+		"update": true, "fix": true, "refactor": true, "feat": true,
+		"chore": true, "delete": true, "remove": true, "add": true,
+	}
+	if reserved[name] {
+		return "clean up " + name
+	}
+	return "update " + name
+}
+
+func wrapFuncList(prefix string, names []string) string {
+	const maxWidth = 72
+	line := prefix + " " + names[0]
+	var result []string
+	for _, name := range names[1:] {
+		next := line + ", " + name
+		if len(next) > maxWidth {
+			result = append(result, line+",")
+			line = "  " + name
+		} else {
+			line = next
+		}
+	}
+	result = append(result, line)
+	return strings.Join(result, "\n")
+}
+
 func buildBody(a analysis) string {
-	if !isLargeDiff(a) {
+	hasSignificantFuncs := len(a.addedFuncs)+len(a.removedFuncs) > 2
+	if !isLargeDiff(a) && !hasSignificantFuncs {
 		return ""
 	}
 
 	var lines []string
 
 	if len(a.addedFuncs) > 0 {
-		funcs := firstN(a.addedFuncs, 4)
-		line := "adds " + joinNames(funcs)
-		if len(a.addedFuncs) > 4 {
-			line += fmt.Sprintf(" and %d more functions", len(a.addedFuncs)-4)
-		}
-		lines = append(lines, line)
+		lines = append(lines, wrapFuncList("adds", a.addedFuncs))
 	} else if len(a.filesAdded) > 0 {
 		names := make([]string, 0, len(a.filesAdded))
-		for _, f := range firstN(a.filesAdded, 3) {
+		for _, f := range a.filesAdded {
 			names = append(names, cleanFileName(f))
 		}
-		line := "adds " + joinNames(names)
-		if len(a.filesAdded) > 3 {
-			line += fmt.Sprintf(" and %d more files", len(a.filesAdded)-3)
-		}
-		lines = append(lines, line)
+		lines = append(lines, wrapFuncList("adds", names))
+	}
+
+	if len(a.sqlTables) > 0 {
+		lines = append(lines, wrapFuncList("tables", a.sqlTables))
 	}
 
 	if len(a.removedFuncs) > 0 {
-		funcs := firstN(a.removedFuncs, 3)
-		line := "removes " + joinNames(funcs)
-		if len(a.removedFuncs) > 3 {
-			line += fmt.Sprintf(" and %d more", len(a.removedFuncs)-3)
-		}
-		lines = append(lines, line)
+		lines = append(lines, wrapFuncList("removes", a.removedFuncs))
 	} else if len(a.filesDeleted) > 0 && len(lines) > 0 {
 		names := make([]string, 0, len(a.filesDeleted))
-		for _, f := range firstN(a.filesDeleted, 2) {
+		for _, f := range a.filesDeleted {
 			names = append(names, cleanFileName(f))
 		}
-		lines = append(lines, "removes "+joinNames(names))
+		lines = append(lines, wrapFuncList("removes", names))
 	}
 
 	if len(a.filesModified) > 0 && len(a.addedFuncs) == 0 && len(a.removedFuncs) == 0 {
 		names := make([]string, 0, len(a.filesModified))
-		for _, f := range firstN(a.filesModified, 3) {
+		for _, f := range a.filesModified {
 			names = append(names, cleanFileName(f))
 		}
-		line := "updates " + joinNames(names)
-		if len(a.filesModified) > 3 {
-			line += fmt.Sprintf(" and %d more", len(a.filesModified)-3)
-		}
-		lines = append(lines, line)
+		lines = append(lines, wrapFuncList("updates", names))
 	}
 
-	if len(lines) > 3 {
-		lines = lines[:3]
-	}
 	return strings.Join(lines, "\n")
 }
 
@@ -235,7 +247,7 @@ func buildSummary(a analysis) string {
 			parts = append(parts, "remove "+joinNames(funcs))
 		} else {
 			for _, f := range firstN(a.filesModified, 2) {
-				parts = append(parts, "update "+cleanFileName(f))
+				parts = append(parts, safeUpdateVerb(cleanFileName(f)))
 			}
 		}
 	}
@@ -265,6 +277,17 @@ func buildDescription(a analysis) string {
 	if len(a.detectedVersions) > 0 {
 		latest := a.detectedVersions[len(a.detectedVersions)-1]
 		return fmt.Sprintf("update version references to %s", latest)
+	}
+
+	if len(a.sqlTables) > 0 && len(a.addedFuncs) == 0 {
+		if len(a.sqlTables) == 1 {
+			return fmt.Sprintf("add %s table", a.sqlTables[0])
+		}
+		return fmt.Sprintf("add %s tables", joinNames(firstN(a.sqlTables, 3)))
+	}
+
+	if len(a.sqlTables) > 0 && len(a.addedFuncs) > 0 {
+		return fmt.Sprintf("add %s and %s table", joinNames(firstN(a.addedFuncs, 2)), a.sqlTables[0])
 	}
 
 	if len(a.htmlElements) > 0 {
@@ -381,38 +404,58 @@ func buildDescription(a analysis) string {
 	}
 
 	if len(a.addedFuncs) > 0 && len(a.removedFuncs) == 0 {
-		funcs := firstN(a.addedFuncs, 3)
 		if len(a.filesModified) == 1 {
-			name := cleanFileName(a.filesModified[0])
-			return fmt.Sprintf("add %s to %s", joinNames(funcs), name)
+			funcs := firstN(a.addedFuncs, 3)
+			return fmt.Sprintf("add %s to %s", joinNames(funcs), cleanFileName(a.filesModified[0]))
 		}
-		return fmt.Sprintf("add %s", joinNames(funcs))
+		names := make([]string, 0, len(a.filesModified))
+		for _, f := range firstN(a.filesModified, 3) {
+			names = append(names, cleanFileName(f))
+		}
+		if len(a.filesModified) > 3 {
+			return fmt.Sprintf("add functions to %s and %d more files", joinNames(names), len(a.filesModified)-3)
+		}
+		return fmt.Sprintf("add functions to %s", joinNames(names))
 	}
 
 	if len(a.removedFuncs) > 0 && len(a.addedFuncs) == 0 {
-		funcs := firstN(a.removedFuncs, 3)
 		if len(a.filesModified) == 1 {
-			name := cleanFileName(a.filesModified[0])
-			return fmt.Sprintf("remove %s from %s", joinNames(funcs), name)
+			funcs := firstN(a.removedFuncs, 3)
+			return fmt.Sprintf("remove %s from %s", joinNames(funcs), cleanFileName(a.filesModified[0]))
 		}
-		return fmt.Sprintf("remove %s", joinNames(funcs))
+		names := make([]string, 0, len(a.filesModified))
+		for _, f := range firstN(a.filesModified, 3) {
+			names = append(names, cleanFileName(f))
+		}
+		return fmt.Sprintf("remove functions from %s", joinNames(names))
 	}
 
 	if len(a.addedFuncs) > 0 && len(a.removedFuncs) > 0 {
 		if len(a.addedFuncs) == 1 && len(a.removedFuncs) == 1 {
 			return fmt.Sprintf("replace %s with %s", a.removedFuncs[0], a.addedFuncs[0])
 		}
-		if isLargeDiff(a) {
-			funcs := firstN(a.addedFuncs, 3)
-			return fmt.Sprintf("add %s", joinNames(funcs))
+		if len(a.filesModified) == 1 {
+			return fmt.Sprintf("refactor %s", cleanFileName(a.filesModified[0]))
 		}
-		return fmt.Sprintf("refactor %s", a.primaryScope)
+		names := make([]string, 0, len(a.filesModified))
+		for _, f := range firstN(a.filesModified, 3) {
+			names = append(names, cleanFileName(f))
+		}
+		return fmt.Sprintf("refactor %s", joinNames(names))
 	}
 
 	if contains(a.patterns, "error-handling") {
-		scope := a.primaryScope
-		if scope != "" {
-			return fmt.Sprintf("handle errors in %s", scope)
+		if len(a.errFuncs) > 0 {
+			if len(a.filesModified) == 1 {
+				return fmt.Sprintf("handle %s error in %s", a.errFuncs[0], cleanFileName(a.filesModified[0]))
+			}
+			return fmt.Sprintf("handle %s error", a.errFuncs[0])
+		}
+		if len(a.filesModified) == 1 {
+			return fmt.Sprintf("handle errors in %s", cleanFileName(a.filesModified[0]))
+		}
+		if a.primaryScope != "" {
+			return fmt.Sprintf("handle errors in %s", a.primaryScope)
 		}
 		return "improve error handling"
 	}
@@ -430,6 +473,13 @@ func buildDescription(a analysis) string {
 	}
 	if contains(a.patterns, "comments") {
 		return "add inline documentation"
+	}
+
+	if a.removedPrints > 0 && len(a.addedFuncs) == 0 && len(a.removedFuncs) == 0 {
+		if len(a.filesModified) == 1 {
+			return "remove command header from " + cleanFileName(a.filesModified[0])
+		}
+		return "remove command headers"
 	}
 
 	if len(a.filesAdded) > 0 && len(a.filesModified) > 0 {
@@ -452,10 +502,10 @@ func buildDescription(a analysis) string {
 		return fmt.Sprintf("remove %d files", len(a.filesDeleted))
 	}
 	if len(a.filesModified) == 1 {
-		return fmt.Sprintf("update %s", cleanFileName(a.filesModified[0]))
+		return safeUpdateVerb(cleanFileName(a.filesModified[0]))
 	}
 
-	return fmt.Sprintf("update %s", a.primaryScope)
+	return safeUpdateVerb(a.primaryScope)
 }
 
 func buildDescriptionAlt(a analysis) string {
@@ -476,20 +526,42 @@ func buildDescriptionAlt(a analysis) string {
 	}
 
 	if len(a.addedFuncs) > 0 && len(a.removedFuncs) == 0 {
-		funcs := firstN(a.addedFuncs, 2)
-		if a.primaryScope != "" {
-			return fmt.Sprintf("implement %s in %s", joinNames(funcs), a.primaryScope)
+		if len(a.filesModified) == 1 {
+			funcs := firstN(a.addedFuncs, 2)
+			if a.primaryScope != "" {
+				return fmt.Sprintf("implement %s in %s", joinNames(funcs), a.primaryScope)
+			}
+			return fmt.Sprintf("implement %s", joinNames(funcs))
 		}
-		return fmt.Sprintf("implement %s", joinNames(funcs))
+		names := make([]string, 0, len(a.filesModified))
+		for _, f := range firstN(a.filesModified, 3) {
+			names = append(names, cleanFileName(f))
+		}
+		return fmt.Sprintf("implement %s", joinNames(names))
 	}
 
 	if len(a.removedFuncs) > 0 && len(a.addedFuncs) == 0 {
-		funcs := firstN(a.removedFuncs, 2)
-		return fmt.Sprintf("clean up %s", joinNames(funcs))
+		if len(a.filesModified) == 1 {
+			funcs := firstN(a.removedFuncs, 2)
+			return fmt.Sprintf("clean up %s", joinNames(funcs))
+		}
+		return fmt.Sprintf("clean up %s", a.primaryScope)
 	}
 
 	if contains(a.patterns, "error-handling") {
+		if len(a.errFuncs) > 0 {
+			if len(a.filesModified) == 1 {
+				return fmt.Sprintf("add error handling for %s in %s", a.errFuncs[0], cleanFileName(a.filesModified[0]))
+			}
+			return fmt.Sprintf("add error handling for %s", a.errFuncs[0])
+		}
+		if len(a.filesModified) == 1 {
+			return fmt.Sprintf("add error handling for %s", cleanFileName(a.filesModified[0]))
+		}
 		return fmt.Sprintf("add error handling for %s", a.primaryScope)
+	}
+	if a.removedPrints > 0 && len(a.addedFuncs) == 0 {
+		return "clean up startup output"
 	}
 	if len(a.filesModified) > 1 {
 		return fmt.Sprintf("refactor %s module", a.primaryScope)
