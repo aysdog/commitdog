@@ -26,8 +26,6 @@ type githubRelease struct {
 
 func runUpdate() {
 	fmt.Println()
-	fmt.Println("  commitdog update")
-	fmt.Println()
 
 	fmt.Printf("  checking latest version...")
 	release, err := fetchLatestRelease()

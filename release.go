@@ -289,7 +289,7 @@ func runRelease() {
 	}
 
 	fmt.Println()
-	fmt.Printf("  detected: \033[36m%s\033[0m  ·  current version: \033[1mv%s\033[0m\n\n", proj.lang, currentVer)
+	fmt.Printf("  detected: %s  ·  current version: %s\n\n", colorCyan(proj.lang), colorBold("v"+currentVer))
 
 	major, minor, patch := splitVer(currentVer)
 	fmt.Printf("  1  patch  →  v%d.%d.%d\n", major, minor, patch+1)
@@ -423,16 +423,19 @@ func runRelease() {
 	if releaseAll {
 		proj2 = loadProjectConfig()
 		for _, mirror := range proj2.mirrors {
+			var mirrorUndos []undoStep
 			mirrorRemote := platformRemoteName(mirror)
 			mirrorAuth := authHeaderForPlatformName(mirror)
-			printStepOrRollback("pushing tags to "+mirror+"...", &undos, func() error {
+			printStepOrRollback("pushing tags to "+mirror+"...", &mirrorUndos, func() error {
 				return runPushTagsWithAuth(mirrorRemote, branch, mirrorAuth)
 			}, nil)
 			mirrorOwner, mirrorRepo := getMirrorOwnerRepo(mirrorRemote)
-			if mirrorOwner != "" && mirrorRepo != "" {
-				mirrorURL := platformRelease(cfg, mirror, mirrorOwner, mirrorRepo, nextVer, changelog, isGo, binaries, checksumFile, &undos)
-				fmt.Printf("  %s\n", mirrorURL)
+			if mirrorOwner == "" || mirrorRepo == "" {
+				fmt.Printf("  %s could not resolve owner/repo for %s — skipping\n", colorYellow("⚠"), mirror)
+				continue
 			}
+			mirrorURL := platformRelease(cfg, mirror, mirrorOwner, mirrorRepo, nextVer, changelog, isGo, binaries, checksumFile, &mirrorUndos)
+			fmt.Printf("  %s\n", mirrorURL)
 		}
 	}
 
@@ -442,7 +445,7 @@ func runRelease() {
 	os.Remove("checksums.txt")
 
 	fmt.Println()
-	fmt.Printf("  \033[32m✓ v%s released\033[0m\n", nextVer)
+	fmt.Printf("  %s\n", colorGreen("✓ v"+nextVer+" released"))
 	fmt.Printf("  %s\n\n", releaseURL)
 }
 
@@ -459,7 +462,7 @@ func getMirrorOwnerRepo(remote string) (string, string) {
 func printStepOrRollback(label string, undos *[]undoStep, fn func() error, undo func() error) {
 	fmt.Printf("  %-38s", label)
 	if err := fn(); err != nil {
-		fmt.Printf("\033[31m✗\033[0m\n")
+		fmt.Printf("%s\n", colorRed("✗"))
 		fmt.Printf("\n  %s step failed: %s\n", colorRed("✗"), err)
 		if len(*undos) > 0 {
 			fmt.Printf("\n  rolling back %d step(s)...\n", len(*undos))
@@ -478,7 +481,7 @@ func printStepOrRollback(label string, undos *[]undoStep, fn func() error, undo 
 		fmt.Println()
 		os.Exit(1)
 	}
-	fmt.Printf("\033[32m✓\033[0m\n")
+	fmt.Printf("%s\n", colorGreen("✓"))
 	if undo != nil {
 		*undos = append(*undos, undoStep{label: strings.TrimSuffix(label, "..."), fn: undo})
 	}
@@ -863,6 +866,6 @@ func runMirrorRelease(cfg config, proj projectConfig, platform string) {
 	os.Remove("checksums.txt")
 
 	fmt.Println()
-	fmt.Printf("  \033[32m✓ v%s published to %s\033[0m\n", gitTag, platform)
+	fmt.Printf("  %s\n", colorGreen("✓ v"+gitTag+" published to "+platform))
 	fmt.Printf("  %s\n\n", releaseURL)
 }
