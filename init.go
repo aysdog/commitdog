@@ -10,8 +10,6 @@ import (
 
 func runInit() {
 	fmt.Println()
-	fmt.Println("  commitdog init")
-	fmt.Println()
 
 	c := loadConfig()
 	proj := loadProjectConfig()
@@ -531,10 +529,29 @@ func addMirrorPlatform(proj projectConfig, c config) {
 	}
 
 	remoteName := platformRemoteName(mirrorPlatform)
-	if err := gitAddRemote(remoteName, remoteURL); err != nil {
-		fmt.Printf("  warning: could not add remote: %v\n", err)
+	if remoteExists(remoteName) {
+		cmd := exec.Command("git", "remote", "set-url", remoteName, remoteURL)
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("  warning: could not update remote URL: %v\n", err)
+		} else {
+			fmt.Printf("  %s remote '%s' URL updated\n", colorGreen("✓"), remoteName)
+		}
+	} else if err := gitAddRemote(remoteName, remoteURL); err != nil {
+		fmt.Printf("  could not add remote '%s': %v\n", remoteName, err)
+		fmt.Printf("  enter remote URL manually (or leave empty to cancel) › ")
+		manualURL := strings.TrimSpace(readLine())
+		if manualURL == "" {
+			fmt.Println("  cancelled.")
+			return
+		}
+		if err2 := gitAddRemote(remoteName, manualURL); err2 != nil {
+			fmt.Printf("  %s could not add remote: %v\n", colorRed("✗"), err2)
+			return
+		}
+		remoteURL = manualURL
+		fmt.Printf("  %s remote '%s' added\n", colorGreen("✓"), remoteName)
 	} else {
-		fmt.Printf("  ✓ remote '%s' added\n", remoteName)
+		fmt.Printf("  %s remote '%s' added\n", colorGreen("✓"), remoteName)
 	}
 
 	branch := getCurrentBranch()
