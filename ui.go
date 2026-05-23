@@ -19,7 +19,7 @@ func pickSuggestion(suggestions []string) string {
 	for i, s := range suggestions {
 		fmt.Printf("  %d  %s\n", i+1, subjectLine(s))
 		if preview := bodyPreview(s); preview != "" {
-			fmt.Printf("     \033[90m%s\033[0m\n", preview)
+			fmt.Printf("     %s\n", colorMuted(preview))
 		}
 	}
 
@@ -157,24 +157,21 @@ func askPush(platform string) {
 							fmt.Println("  no mirror remotes configured. run 'commitdog init' to add one.")
 							return
 						}
-						for i, m := range availableMirrors {
-							fmt.Printf("  %d  %s\n", i+1, m)
-						}
-						fmt.Println()
-						fmt.Printf("  [1-%d] pick › ", len(availableMirrors))
-						input := strings.TrimSpace(readLine())
-						for i, m := range availableMirrors {
-							if input == fmt.Sprintf("%d", i+1) {
-								mirrorRemote := platformRemoteName(m)
-								mirrorAuth := authHeaderForPlatformName(m)
-								fmt.Printf("  pushing to %s...\n", m)
-								if merr := runPushWithAuth(mirrorRemote, branch, mirrorAuth); merr != nil {
-									fmt.Printf("  %s push to %s failed: %s\n", colorRed("✗"), m, merr)
-								} else {
-									fmt.Printf("  %s pushed to %s/%s\n", colorGreen("✓"), mirrorRemote, branch)
-								}
-								break
+						pushed := false
+						for _, m := range availableMirrors {
+							mirrorRemote := platformRemoteName(m)
+							mirrorAuth := authHeaderForPlatformName(m)
+							fmt.Printf("  trying %s...", m)
+							if merr := runPushWithAuth(mirrorRemote, branch, mirrorAuth); merr != nil {
+								fmt.Printf("\n  %s push to %s failed: %s\n", colorRed("✗"), m, merr)
+								continue
 							}
+							fmt.Printf("\n  %s pushed to %s/%s\n", colorGreen("✓"), mirrorRemote, branch)
+							pushed = true
+							break
+						}
+						if !pushed {
+							fmt.Printf("\n  %s all platforms unreachable. check your network and tokens.\n\n", colorRed("✗"))
 						}
 					}
 				} else {
