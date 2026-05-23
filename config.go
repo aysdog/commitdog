@@ -203,8 +203,6 @@ func tokenForPlatform(c config, platform string) string {
 
 func runSetup() {
 	fmt.Println()
-	fmt.Println("  commitdog setup")
-	fmt.Println()
 
 	existing := loadConfig()
 
