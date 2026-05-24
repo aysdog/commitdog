@@ -370,17 +370,51 @@ func changePrimaryPlatform(proj projectConfig) {
 					fatal("could not update .commitdog: %v", err)
 				}
 				newRemote := platformRemoteName(newPrimary)
+				newURL := ""
+
 				if newRemote != "origin" && remoteExists(newRemote) {
 					cmd := exec.Command("git", "remote", "get-url", newRemote)
 					var out strings.Builder
 					cmd.Stdout = &out
 					if err := cmd.Run(); err == nil {
-						newURL := strings.TrimSpace(out.String())
-						exec.Command("git", "remote", "set-url", "origin", newURL).Run()
-						fmt.Printf("  ✓ origin updated to %s\n", newURL)
+						newURL = strings.TrimSpace(out.String())
 					}
 				}
-				fmt.Printf("  ✓ primary platform changed to %s\n\n", newPrimary)
+
+				if newURL == "" {
+					_, repoName := getRepoOwnerAndName()
+					if repoName == "" {
+						if cwd, err := os.Getwd(); err == nil {
+							if idx := strings.LastIndex(cwd, "/"); idx >= 0 {
+								repoName = cwd[idx+1:]
+							}
+						}
+					}
+					if repoName != "" {
+						newURL, _ = buildOriginURL(newPrimary, repoName, cfg)
+						if newURL == "" {
+							newURL, _ = fetchRepoCloneURL(newPrimary, repoName, cfg)
+						}
+						if newURL == "" {
+							fmt.Printf("  %s repo not found on %s — you may need to create it first\n", colorYellow("⚠"), newPrimary)
+							fmt.Printf("  1  create repo on %s now\n", newPrimary)
+							fmt.Println("  2  continue anyway")
+							fmt.Println()
+							fmt.Printf("  [1/2] pick › ")
+							if strings.TrimSpace(readLine()) == "1" {
+								fmt.Println()
+								runInit()
+								return
+							}
+						}
+					}
+				}
+
+				if newURL != "" {
+					exec.Command("git", "remote", "set-url", "origin", newURL).Run()
+					fmt.Printf("  %s origin → %s\n", colorGreen("✓"), newURL)
+				}
+				fmt.Printf("  %s primary platform changed to %s\n\n", colorGreen("✓"), newPrimary)
 				return
 			}
 		}
@@ -539,10 +573,7 @@ func addMirrorPlatform(proj projectConfig, c config) {
 		}
 	} else {
 		fmt.Printf("\n  ✓ repo created: %s\n\n", repo.HTMLURL)
-		remoteURL = repo.SSHURL
-		if !hasSSHKey(sshHostForPlatform(c, mirrorPlatform)) {
-			remoteURL = strings.TrimSuffix(repo.HTMLURL, ".git") + ".git"
-		}
+		remoteURL = strings.TrimSuffix(repo.HTMLURL, ".git") + ".git"
 	}
 
 	remoteName := platformRemoteName(mirrorPlatform)
@@ -571,23 +602,25 @@ func addMirrorPlatform(proj projectConfig, c config) {
 		fmt.Printf("  %s remote '%s' added\n", colorGreen("✓"), remoteName)
 	}
 
-	branch := getCurrentBranch()
-	authHeader := authHeaderForPlatformName(mirrorPlatform)
-	fmt.Printf("  pushing to %s...", mirrorPlatform)
-	if err := runPushUpstreamWithAuth(remoteName, branch, authHeader); err != nil {
-		fmt.Printf("\n  push failed: %v\n", err)
-	} else {
-		fmt.Printf("\n  ✓ pushed\n")
-	}
-
 	proj.mirrors = append(proj.mirrors, mirrorPlatform)
 	if proj.primary == "" {
 		proj.primary = primary
 	}
 	if err := saveProjectConfig(proj); err != nil {
-		fmt.Printf("  warning: could not update .commitdog: %v\n", err)
+		fmt.Printf("  %s could not update .commitdog: %v\n", colorRed("✗"), err)
 	} else {
-		fmt.Printf("  ✓ .commitdog updated\n\n")
+		fmt.Printf("  %s .commitdog updated\n", colorGreen("✓"))
+	}
+
+	branch := getCurrentBranch()
+	authHeader := authHeaderForPlatformName(mirrorPlatform)
+	fmt.Printf("  pushing to %s...", mirrorPlatform)
+	if err := runPushUpstreamWithAuth(remoteName, branch, authHeader); err != nil {
+		fmt.Printf("\n  %s push failed: %v\n", colorRed("✗"), err)
+		platformFlags := map[string]string{"github": "gh", "gitlab": "gl", "gitea": "gt", "forgejo": "fg"}
+		fmt.Printf("  mirror registered — run 'commitdog -%s' to retry\n\n", platformFlags[mirrorPlatform])
+	} else {
+		fmt.Printf("\n  %s pushed\n\n", colorGreen("✓"))
 	}
 }
 
