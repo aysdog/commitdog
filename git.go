@@ -386,6 +386,15 @@ func hasUnpushedCommits(remote, branch string) bool {
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
+		refCheck := exec.Command("git", "rev-parse", "--verify", remote+"/"+branch)
+		if refCheck.Run() != nil {
+			countCmd := exec.Command("git", "rev-list", "--count", "HEAD")
+			var countOut bytes.Buffer
+			countCmd.Stdout = &countOut
+			if countCmd.Run() == nil && strings.TrimSpace(countOut.String()) != "0" {
+				return true
+			}
+		}
 		return false
 	}
 	return strings.TrimSpace(out.String()) != ""

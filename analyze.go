@@ -36,6 +36,8 @@ type analysis struct {
 	sqlTables        []string
 	removedPrints    int
 	errFuncs         []string
+	linesAdded       int
+	linesRemoved     int
 }
 
 var (
@@ -228,6 +230,13 @@ func analyzeDiffWithBranch(diff string, branch string) analysis {
 		}
 		if v := extractVarName(line, currentFile, false); v != "" {
 			a.removedVars = appendUnique(a.removedVars, v)
+		}
+
+		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+			a.linesAdded++
+		}
+		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+			a.linesRemoved++
 		}
 
 		if strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") {
@@ -610,6 +619,10 @@ func inferType(a analysis) string {
 
 	if a.removedPrints > 0 && len(a.addedFuncs) == 0 && len(a.removedFuncs) == 0 && !contains(a.patterns, "error-handling") {
 		return "chore"
+	}
+
+	if len(a.addedFuncs) == 0 && len(a.removedFuncs) == 0 && a.linesRemoved > a.linesAdded {
+		return "fix"
 	}
 
 	if len(a.htmlElements) > 0 {

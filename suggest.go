@@ -502,7 +502,14 @@ func buildDescription(a analysis) string {
 		return fmt.Sprintf("remove %d files", len(a.filesDeleted))
 	}
 	if len(a.filesModified) == 1 {
-		return safeUpdateVerb(cleanFileName(a.filesModified[0]))
+		name := cleanFileName(a.filesModified[0])
+		if a.linesRemoved > a.linesAdded+3 {
+			return "simplify " + name
+		}
+		if a.linesAdded > a.linesRemoved+5 {
+			return "extend " + name
+		}
+		return safeUpdateVerb(name)
 	}
 
 	return safeUpdateVerb(a.primaryScope)
