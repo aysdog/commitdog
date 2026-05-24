@@ -140,11 +140,17 @@ func offerRecovery(r *recovery) bool {
 		fmt.Println()
 		return false
 	}
-	fmt.Printf("\n  fix automatically? [Y/n] › ")
-	input := readLine()
-	if input == "n" || input == "no" {
-		fmt.Println()
-		return false
+	fmt.Printf("\n  fix automatically? [y/n] › ")
+	for {
+		input := strings.ToLower(strings.TrimSpace(readLine()))
+		if input == "y" || input == "yes" {
+			break
+		}
+		if input == "n" || input == "no" {
+			fmt.Println()
+			return false
+		}
+		fmt.Printf("  type 'y' or 'n' › ")
 	}
 	fmt.Println()
 	if err := r.autoFix(); err != nil {
@@ -417,6 +423,29 @@ func autoFixRemoteName(detected string) error {
 		return fmt.Errorf("could not extract repo name from: %s", detectedURL)
 	}
 
+	c := loadConfig()
+	verifiedURL, err := fetchRepoCloneURL(detected, repoName, c)
+	if err != nil || verifiedURL == "" {
+		fmt.Println()
+		fmt.Printf("  %s repo '%s' not found on %s\n\n", colorRed("✗"), repoName, detected)
+		fmt.Println("  the remote URL may be stale or the repo was deleted.")
+		fmt.Println()
+		fmt.Println("  1  enter URL manually")
+		fmt.Println("  2  cancel")
+		fmt.Println()
+		fmt.Printf("  [1/2] pick › ")
+		if strings.TrimSpace(readLine()) != "1" {
+			fmt.Println()
+			return fmt.Errorf("cancelled")
+		}
+		fmt.Printf("  remote URL › ")
+		manualURL := strings.TrimSpace(readLine())
+		if manualURL == "" {
+			return fmt.Errorf("cancelled")
+		}
+		verifiedURL = manualURL
+	}
+
 	fmt.Println()
 	fmt.Printf("  %s  connecting origin to an existing repo\n\n", colorYellow("⚠"))
 	fmt.Printf("  found repo '%s' on %s\n\n", repoName, detected)
@@ -444,40 +473,23 @@ func autoFixRemoteName(detected string) error {
 
 	fmt.Println()
 
-	c := loadConfig()
-	expectedURL, err := buildOriginURL(detected, repoName, c)
-
-	var finalURL string
-	switch {
-	case err != nil || expectedURL == "":
-		finalURL, err = fetchRepoCloneURL(detected, repoName, c)
-		if err != nil {
-			return fmt.Errorf("could not resolve repo URL: %s", err)
-		}
-	case expectedURL != detectedURL:
-		fmt.Printf("  %s URL mismatch — using stored config URL\n\n", colorYellow("⚠"))
-		finalURL = expectedURL
-	default:
-		finalURL = detectedURL
-	}
-
 	var setErr bytes.Buffer
 	checkCmd := exec.Command("git", "remote", "get-url", "origin")
 	if err := checkCmd.Run(); err != nil {
-		addCmd := exec.Command("git", "remote", "add", "origin", finalURL)
+		addCmd := exec.Command("git", "remote", "add", "origin", verifiedURL)
 		addCmd.Stderr = &setErr
 		if err := addCmd.Run(); err != nil {
 			return fmt.Errorf("failed to add origin: %s", strings.TrimSpace(setErr.String()))
 		}
 	} else {
-		setCmd := exec.Command("git", "remote", "set-url", "origin", finalURL)
+		setCmd := exec.Command("git", "remote", "set-url", "origin", verifiedURL)
 		setCmd.Stderr = &setErr
 		if err := setCmd.Run(); err != nil {
 			return fmt.Errorf("failed to update origin: %s", strings.TrimSpace(setErr.String()))
 		}
 	}
 
-	fmt.Printf("  %s origin → %s\n", colorGreen("✓"), finalURL)
+	fmt.Printf("  %s origin → %s\n", colorGreen("✓"), verifiedURL)
 	return nil
 }
 
