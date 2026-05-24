@@ -275,11 +275,7 @@ func authHeaderForPlatform(token string) string {
 func currentAuthHeader() string {
 	c := loadConfig()
 	proj := loadProjectConfig()
-	platform := proj.platform
-	if platform == "" {
-		platform = "github"
-	}
-	return authHeaderForPlatform(tokenForPlatform(c, platform))
+	return authHeaderForPlatform(tokenForPlatform(c, proj.effectivePrimary()))
 }
 
 func runPushWithAuth(remote, branch, authHeader string) error {

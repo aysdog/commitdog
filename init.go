@@ -327,6 +327,23 @@ func changePrimaryPlatform(proj projectConfig) {
 		}
 		for i, newPrimary := range all {
 			if input == fmt.Sprintf("%d", i+1) {
+				cfg := loadConfig()
+				if tokenForPlatform(cfg, newPrimary) == "" {
+					fmt.Println()
+					fmt.Printf("  %s %s is not configured — no token found.\n\n", colorYellow("⚠"), newPrimary)
+					fmt.Printf("  configure %s now? [Y/n] › ", newPrimary)
+					ans := strings.ToLower(strings.TrimSpace(readLine()))
+					if ans == "n" || ans == "no" {
+						fmt.Println("  cancelled.")
+						return
+					}
+					runSetup()
+					cfg = loadConfig()
+					if tokenForPlatform(cfg, newPrimary) == "" {
+						fmt.Printf("  %s no token saved for %s — cancelled.\n\n", colorRed("✗"), newPrimary)
+						return
+					}
+				}
 				oldPrimary := proj.effectivePrimary()
 				proj.primary = newPrimary
 				proj.platform = newPrimary

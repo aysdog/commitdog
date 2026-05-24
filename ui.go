@@ -95,23 +95,70 @@ func askPush(platform string) {
 	remote := remoteForPlatform(platform)
 	if !remoteExists(remote) {
 		fmt.Println()
-		fmt.Printf("  remote '%s' not configured.\n\n", remote)
-		fmt.Println("  1  add remote now")
-		fmt.Println("  2  skip")
-		fmt.Println()
-		fmt.Printf("  [1/2] pick › ")
-		if strings.TrimSpace(readLine()) == "1" {
-			fmt.Printf("  remote URL › ")
-			url := strings.TrimSpace(readLine())
-			if url != "" {
-				if err := gitAddRemote(remote, url); err != nil {
-					fmt.Printf("  could not add remote: %v\n\n", err)
+		c := loadConfig()
+		_, repoName := getRepoOwnerAndName()
+		if repoName == "" {
+			cwd, _ := os.Getwd()
+			if idx := strings.LastIndex(cwd, "/"); idx >= 0 {
+				repoName = cwd[idx+1:]
+			}
+		}
+
+		detectedURL, _ := buildOriginURL(platform, repoName, c)
+		if detectedURL == "" {
+			detectedURL, _ = fetchRepoCloneURL(platform, repoName, c)
+		}
+
+		if detectedURL != "" {
+			fmt.Printf("  remote '%s' not configured.\n\n", remote)
+			fmt.Printf("  detected: %s\n\n", detectedURL)
+			fmt.Println("  1  connect to this repo")
+			fmt.Println("  2  enter URL manually")
+			fmt.Println("  3  skip")
+			fmt.Println()
+			fmt.Printf("  [1/2/3] pick › ")
+			switch strings.TrimSpace(readLine()) {
+			case "1":
+				if err := gitAddRemote(remote, detectedURL); err != nil {
+					exec.Command("git", "remote", "set-url", remote, detectedURL).Run()
+				}
+				fmt.Printf("  %s remote '%s' configured\n\n", colorGreen("✓"), remote)
+			case "2":
+				fmt.Printf("  remote URL › ")
+				url := strings.TrimSpace(readLine())
+				if url == "" {
 					return
 				}
-				fmt.Printf("  ✓ remote '%s' added\n\n", remote)
+				if err := gitAddRemote(remote, url); err != nil {
+					fmt.Printf("  %s could not add remote: %v\n\n", colorRed("✗"), err)
+					return
+				}
+				fmt.Printf("  %s remote '%s' added\n\n", colorGreen("✓"), remote)
+			default:
+				fmt.Println("  skipped.")
+				return
 			}
 		} else {
-			return
+			fmt.Printf("  remote '%s' not configured.\n\n", remote)
+			fmt.Printf("  could not detect repo URL for %s — enter manually or skip.\n\n", platform)
+			fmt.Println("  1  enter URL manually")
+			fmt.Println("  2  skip")
+			fmt.Println()
+			fmt.Printf("  [1/2] pick › ")
+			if strings.TrimSpace(readLine()) != "1" {
+				fmt.Println("  skipped.")
+				return
+			}
+			fmt.Printf("  remote URL › ")
+			url := strings.TrimSpace(readLine())
+			if url == "" {
+				return
+			}
+			if err := gitAddRemote(remote, url); err != nil {
+				fmt.Printf("  %s could not add remote: %v\n\n", colorRed("✗"), err)
+				return
+			}
+			fmt.Printf("  %s remote '%s' added\n\n", colorGreen("✓"), remote)
 		}
 	}
 
@@ -133,7 +180,19 @@ func askPush(platform string) {
 				fmt.Println()
 				r := detectAndRecover(err.Error())
 				if r != nil {
-					offerRecovery(r)
+					if offerRecovery(r) {
+						fmt.Printf("  retrying push...")
+						if !hasUpstream(branch) {
+							err = runPushUpstreamWithAuth(remote, branch, authHeader)
+						} else {
+							err = runPushWithAuth(remote, branch, authHeader)
+						}
+						if err != nil {
+							fmt.Printf("\n  %s push failed: %s\n", colorRed("✗"), err)
+						} else {
+							fmt.Printf("\n  %s pushed to %s/%s\n", colorGreen("✓"), remote, branch)
+						}
+					}
 					return
 				}
 				proj := loadProjectConfig()
