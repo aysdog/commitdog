@@ -512,7 +512,11 @@ func buildDescription(a analysis) string {
 		return safeUpdateVerb(name)
 	}
 
-	return safeUpdateVerb(a.primaryScope)
+	scope := a.primaryScope
+	if scope == "" && len(a.filesModified) > 0 {
+		scope = cleanFileName(a.filesModified[0])
+	}
+	return safeUpdateVerb(scope)
 }
 
 func buildDescriptionAlt(a analysis) string {
@@ -571,7 +575,14 @@ func buildDescriptionAlt(a analysis) string {
 		return "clean up startup output"
 	}
 	if len(a.filesModified) > 1 {
-		return fmt.Sprintf("refactor %s module", a.primaryScope)
+		scope := a.primaryScope
+		if scope == "" && len(a.filesModified) > 0 {
+			scope = cleanFileName(a.filesModified[0])
+		}
+		if scope == "" {
+			return "refactor code"
+		}
+		return fmt.Sprintf("refactor %s module", scope)
 	}
 	return ""
 }
