@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 )
 
 const version = "0.2.9"
@@ -165,6 +166,21 @@ func runCommitFlow(files []string, platform string) {
 			askPush(platform)
 			return
 		}
+		proj2 := loadProjectConfig()
+		platformFlags := map[string]string{
+			"github":  "gh",
+			"gitlab":  "gl",
+			"gitea":   "gt",
+			"forgejo": "fg",
+		}
+		for _, m := range proj2.mirrors {
+			mr := remoteForPlatform(m)
+			if hasUnpushedCommits(mr, branch) {
+				fmt.Printf("  up to date with %s\n", targetPlatform)
+				fmt.Printf("  %s has unpushed commits — run 'commitdog -%s' to push\n\n", m, platformFlags[m])
+				return
+			}
+		}
 		fatal("nothing to commit — no changes found.")
 	}
 
@@ -190,7 +206,10 @@ func runCommitFlow(files []string, platform string) {
 
 	chosen := pickSuggestion(suggestions)
 	if chosen == "" {
+		exec.Command("git", "restore", "--staged", ".").Run()
+		fmt.Println()
 		fmt.Println("  aborted.")
+		fmt.Printf("  %s staged changes removed\n\n", colorYellow("⚠"))
 		os.Exit(0)
 	}
 
