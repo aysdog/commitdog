@@ -326,14 +326,33 @@ func runRelease() {
 		break
 	}
 
-	changelog := buildChangelog(currentVer)
+	bc, bcErr := collectBranchChanges("HEAD", "v"+currentVer)
+	var changelog string
+	if bcErr == nil && bc.total > 0 {
+		changelog = generateReleaseNotes("v"+nextVer, bc)
+	} else {
+		changelog = buildChangelog(currentVer)
+	}
+
 	fmt.Println()
-	fmt.Println("  changelog preview:")
-	fmt.Println()
+	fmt.Println(colorMuted("  ─────────────────────────────────"))
 	for _, line := range strings.Split(changelog, "\n") {
 		fmt.Println("  " + line)
 	}
+	fmt.Println(colorMuted("  ─────────────────────────────────"))
 	fmt.Println()
+	fmt.Printf("  [enter] use as-is  [e] edit  [q] cancel › ")
+	input := strings.ToLower(strings.TrimSpace(readLine()))
+	if input == "q" {
+		fmt.Println("  aborted.")
+		return
+	}
+	if input == "e" {
+		edited, err := openInEditor(changelog)
+		if err == nil {
+			changelog = strings.TrimSpace(edited)
+		}
+	}
 	fmt.Printf("  release v%s → v%s? [y/n] › ", currentVer, nextVer)
 	if confirm := readLine(); confirm != "y" && confirm != "yes" {
 		fmt.Println("  aborted.")
