@@ -128,7 +128,34 @@ func doMerge(s mergeBranch, into string) {
 				fatal("merge failed: %v", err)
 			}
 			fmt.Println(" done")
-			fmt.Printf("  ✓ merged %s into %s\n", s.name, into)
+
+			bc, err := collectBranchChanges(s.name, into)
+			if err == nil && bc.total > 0 {
+				mergeMsg := generateMergeCommitMsg(bc, into)
+				fmt.Println()
+				fmt.Println(colorMuted("  ─────────────────────────────────"))
+				for _, line := range strings.Split(mergeMsg, "\n") {
+					fmt.Printf("  %s\n", line)
+				}
+				fmt.Println(colorMuted("  ─────────────────────────────────"))
+				fmt.Println()
+				fmt.Printf("  [enter] use this message  [e] edit  [s] skip › ")
+				input := strings.ToLower(strings.TrimSpace(readLine()))
+				switch input {
+				case "e":
+					edited, err := openInEditor(mergeMsg)
+					if err == nil {
+						mergeMsg = strings.TrimSpace(edited)
+					}
+					exec.Command("git", "commit", "--amend", "-m", mergeMsg).Run()
+				case "s":
+					break
+				default:
+					exec.Command("git", "commit", "--amend", "-m", mergeMsg).Run()
+				}
+			}
+
+			fmt.Printf("  %s merged %s into %s\n", colorGreen("✓"), s.name, into)
 			askPush("")
 			return
 		case "2":
@@ -164,7 +191,7 @@ func doMergeWithConflicts(branch string) {
 
 	if len(conflicted) == 1 {
 		fmt.Printf("  opening %s in editor...\n", conflicted[0])
-		openInEditor(conflicted[0])
+		openFileInEditor(conflicted[0])
 	} else {
 		fmt.Printf("  [1-%d] open file, [q] quit › ", len(conflicted))
 		for {
@@ -174,7 +201,7 @@ func doMergeWithConflicts(branch string) {
 			}
 			for i, f := range conflicted {
 				if input == fmt.Sprintf("%d", i+1) {
-					openInEditor(f)
+					openFileInEditor(f)
 					fmt.Printf("  [1-%d] open another, [q] done › ", len(conflicted))
 					break
 				}
@@ -352,7 +379,7 @@ func getConflictedFiles() ([]string, error) {
 	return files, nil
 }
 
-func openInEditor(file string) {
+func openFileInEditor(file string) {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = os.Getenv("VISUAL")
