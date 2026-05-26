@@ -108,29 +108,13 @@ func runPRCreate(token, branch, base string) {
 		return
 	}
 
-	defaultTitle := getLastCommitSubject()
-
-	fmt.Println()
-	fmt.Printf("  creating PR: %s → %s\n\n", colorCyan(branch), colorCyan(base))
-	fmt.Printf("  title › ")
-
-	titleInput := readLine()
-	if titleInput == "" {
-		titleInput = defaultTitle
+	titleInput, desc, ok := gatherPRContent(branch, base)
+	if !ok {
+		fmt.Println("  aborted.")
+		return
 	}
 	if titleInput == "" {
 		fmt.Println("  aborted: title cannot be empty.")
-		return
-	}
-
-	fmt.Printf("  description (optional) › ")
-	desc := readLine()
-
-	fmt.Println()
-	fmt.Printf("  [enter] confirm  [q] cancel › ")
-	confirm := readLine()
-	if confirm == "q" {
-		fmt.Println("  aborted.")
 		return
 	}
 
@@ -529,23 +513,15 @@ func runPRCreateGitLab(token, host, branch, base string) {
 		return
 	}
 
-	defaultTitle := getLastCommitSubject()
-
-	fmt.Println()
-	fmt.Printf("  creating MR: %s → %s\n\n", colorCyan(branch), colorCyan(base))
-	fmt.Printf("  title [%s] › ", defaultTitle)
-
-	title := readLine()
-	if title == "" {
-		title = defaultTitle
+	title, desc, ok := gatherPRContent(branch, base)
+	if !ok {
+		fmt.Println("  aborted.")
+		return
 	}
 	if title == "" {
 		fmt.Println("  aborted: title cannot be empty.")
 		return
 	}
-
-	fmt.Printf("  description (optional) › ")
-	desc := readLine()
 
 	fmt.Println()
 	fmt.Printf("  creating MR...")
@@ -648,23 +624,15 @@ func runPRCreateGitea(token, host, branch, base string) {
 		return
 	}
 
-	defaultTitle := getLastCommitSubject()
-
-	fmt.Println()
-	fmt.Printf("  creating PR: %s → %s\n\n", colorCyan(branch), colorCyan(base))
-	fmt.Printf("  title [%s] › ", defaultTitle)
-
-	title := readLine()
-	if title == "" {
-		title = defaultTitle
+	title, desc, ok := gatherPRContent(branch, base)
+	if !ok {
+		fmt.Println("  aborted.")
+		return
 	}
 	if title == "" {
 		fmt.Println("  aborted: title cannot be empty.")
 		return
 	}
-
-	fmt.Printf("  description (optional) › ")
-	desc := readLine()
 
 	fmt.Println()
 	fmt.Printf("  creating PR...")
@@ -762,23 +730,15 @@ func runPRCreateForgejo(token, host, branch, base string) {
 		return
 	}
 
-	defaultTitle := getLastCommitSubject()
-
-	fmt.Println()
-	fmt.Printf("  creating PR: %s → %s\n\n", colorCyan(branch), colorCyan(base))
-	fmt.Printf("  title [%s] › ", defaultTitle)
-
-	title := readLine()
-	if title == "" {
-		title = defaultTitle
+	title, desc, ok := gatherPRContent(branch, base)
+	if !ok {
+		fmt.Println("  aborted.")
+		return
 	}
 	if title == "" {
 		fmt.Println("  aborted: title cannot be empty.")
 		return
 	}
-
-	fmt.Printf("  description (optional) › ")
-	desc := readLine()
 
 	fmt.Println()
 	fmt.Printf("  creating PR...")
