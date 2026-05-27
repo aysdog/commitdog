@@ -7,28 +7,37 @@ import (
 )
 
 type analysis struct {
-	filesChanged  int
-	filesAdded    []string
-	filesDeleted  []string
-	filesModified []string
-	primaryScope  string
-	commitType    string
-	addedFuncs    []string
-	removedFuncs  []string
-	renamedFuncs  [][2]string
-	addedVars     []string
-	removedVars   []string
-	renamedFiles  [][2]string
-	branchHint    string
-	patterns      []string
-	isMigration   bool
-	isDepUpdate   bool
-	isDocsOnly    bool
-	isTestOnly    bool
-	isConfigOnly  bool
-	isDeleteOnly  bool
-	isNewFiles    bool
-	isRenameOnly  bool
+	filesChanged     int
+	filesAdded       []string
+	filesDeleted     []string
+	filesModified    []string
+	primaryScope     string
+	commitType       string
+	addedFuncs       []string
+	removedFuncs     []string
+	renamedFuncs     [][2]string
+	addedVars        []string
+	removedVars      []string
+	renamedFiles     [][2]string
+	branchHint       string
+	patterns         []string
+	isMigration      bool
+	isDepUpdate      bool
+	isDocsOnly       bool
+	isTestOnly       bool
+	isConfigOnly     bool
+	isDeleteOnly     bool
+	isNewFiles       bool
+	isRenameOnly     bool
+	detectedVersions []string
+	htmlElements     []string
+	cssClasses       []string
+	shellFuncs       []string
+	sqlTables        []string
+	removedPrints    int
+	errFuncs         []string
+	linesAdded       int
+	linesRemoved     int
 }
 
 var (
@@ -39,6 +48,14 @@ var (
 	docFilePatterns = []string{
 		"README", ".md", ".rst", ".txt", "CHANGELOG", "LICENSE", "CONTRIBUTING",
 	}
+	htmlFilePatterns   = []string{".html", ".htm"}
+	cssFilePatterns    = []string{".css", ".scss", ".less", ".sass"}
+	shellFilePatterns  = []string{".sh", ".bash", ".zsh", ".fish"}
+	phpFilePatterns    = []string{".php"}
+	cFilePatterns      = []string{".c", ".cpp", ".cc", ".cxx", ".h", ".hpp"}
+	vueFilePatterns    = []string{".vue"}
+	svelteFilePatterns = []string{".svelte"}
+	sqlFilePatterns    = []string{".sql"}
 	configFilePatterns = []string{
 		".toml", ".yaml", ".yml", ".json", ".env", ".ini", ".cfg",
 		"Makefile", "Dockerfile", ".dockerignore", ".gitignore",
@@ -67,11 +84,17 @@ var (
 	reFuncRb   = regexp.MustCompile(`^\+\s*def\s+(\w+)`)
 	reFuncRs   = regexp.MustCompile(`^\+(?:pub\s+)?fn\s+(\w+)\s*[<(]`)
 	reFuncJava = regexp.MustCompile(`^\+\s*(?:public|private|protected|static|\s)+\s+\w+\s+(\w+)\s*\(`)
+	reFuncPHP  = regexp.MustCompile(`^\+\s*(?:(?:public|private|protected|static|abstract|final)\s+)*function\s+(\w+)\s*\(`)
+	reFuncC    = regexp.MustCompile(`^\+(?:static\s+|inline\s+|extern\s+|virtual\s+)?(?:const\s+)?(?:unsigned\s+|signed\s+|long\s+|short\s+)?(?:void|bool|int|char|float|double|size_t|string|auto)\s+\*?(\w+)\s*\(`)
+	reTSType   = regexp.MustCompile(`^\+(?:export\s+)?(?:interface|type|enum)\s+(\w+)[\s{<=(]`)
 
-	reRmFuncGo = regexp.MustCompile(`^-func\s+(?:\(\w+\s+\*?\w+\)\s+)?(\w+)\s*\(`)
-	reRmFuncJS = regexp.MustCompile(`^-(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(`)
-	reRmFuncPy = regexp.MustCompile(`^-def\s+(\w+)\s*\(`)
-	reRmFuncRs = regexp.MustCompile(`^-(?:pub\s+)?fn\s+(\w+)\s*[<(]`)
+	reRmFuncGo  = regexp.MustCompile(`^-func\s+(?:\(\w+\s+\*?\w+\)\s+)?(\w+)\s*\(`)
+	reRmFuncJS  = regexp.MustCompile(`^-(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(`)
+	reRmFuncPy  = regexp.MustCompile(`^-def\s+(\w+)\s*\(`)
+	reRmFuncRs  = regexp.MustCompile(`^-(?:pub\s+)?fn\s+(\w+)\s*[<(]`)
+	reRmFuncPHP = regexp.MustCompile(`^-\s*(?:(?:public|private|protected|static|abstract|final)\s+)*function\s+(\w+)\s*\(`)
+	reRmFuncC   = regexp.MustCompile(`^-(?:static\s+|inline\s+|extern\s+|virtual\s+)?(?:const\s+)?(?:unsigned\s+|signed\s+|long\s+|short\s+)?(?:void|bool|int|char|float|double|size_t|string|auto)\s+\*?(\w+)\s*\(`)
+	reRmTSType  = regexp.MustCompile(`^-(?:export\s+)?(?:interface|type|enum)\s+(\w+)[\s{<=(]`)
 
 	reVarGoAdd = regexp.MustCompile(`^\+(?:var|const)\s+(\w{2,})\b`)
 	reVarGoRm  = regexp.MustCompile(`^-(?:var|const)\s+(\w{2,})\b`)
@@ -80,9 +103,25 @@ var (
 	reVarPyAdd = regexp.MustCompile(`^\+([A-Z][A-Z0-9_]{2,})\s*=`)
 	reVarPyRm  = regexp.MustCompile(`^-([A-Z][A-Z0-9_]{2,})\s*=`)
 
-	reErrorHandling = regexp.MustCompile(`^\+.*(?:err|error|Error|exception|Exception|catch|rescue)\b`)
-	reLogging       = regexp.MustCompile(`^\+.*(?:log\.|logger\.|console\.log|fmt\.Print|println!|logging\.)`)
-	reRmLogging     = regexp.MustCompile(`^-.*(?:console\.log|fmt\.Print|println!|log\.Debug)`)
+	reVersion      = regexp.MustCompile(`v\d+\.\d+\.\d+`)
+	reHTMLTag      = regexp.MustCompile(`^\+\s*<(section|article|nav|header|footer|main|form|dialog|template|aside|table|ul|ol)\b`)
+	reHTMLId       = regexp.MustCompile(`^\+.*\bid="([a-zA-Z][\w-]+)"`)
+	reCSSClass     = regexp.MustCompile(`^\+\.([a-zA-Z][\w-]{2,})\s*(?:\{|,)`)
+	reCSSVar       = regexp.MustCompile(`^\+\s*--([a-zA-Z][\w-]+)\s*:`)
+	reFuncSh       = regexp.MustCompile(`^\+(?:function\s+)?(\w+)\s*\(\s*\)\s*\{`)
+	reVarGoBlock   = regexp.MustCompile(`^\+\t([a-zA-Z]\w{2,})\s*(?:=|\s+\*?[A-Z])`)
+	reVarGoBlockRm = regexp.MustCompile(`^-\t([a-zA-Z]\w{2,})\s*(?:=|\s+\*?[A-Z])`)
+	reSQLCreate    = regexp.MustCompile(`(?i)^\+\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\w+\.)?(\w+)`)
+	reSQLFunc      = regexp.MustCompile(`(?i)^\+\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\s+(?:\w+\.)?(\w+)\s*\(`)
+	reSQLDrop      = regexp.MustCompile(`(?i)^-\s*DROP\s+(?:TABLE|VIEW|FUNCTION|PROCEDURE)\s+(?:IF\s+EXISTS\s+)?(?:\w+\.)?(\w+)`)
+	reSQLAlter     = regexp.MustCompile(`(?i)^\+\s*ALTER\s+TABLE\s+(?:\w+\.)?(\w+)`)
+
+	reErrorHandling = regexp.MustCompile(`^\+\s*(?:}?\s*else\s+)?if\s+\w*[Ee]rr\w*\s*(?::?=|!=)`)
+	reErrInline     = regexp.MustCompile(`^\+.*;\s*\w*[Ee]rr\w*\s*!=\s*nil`)
+	reErrFuncCall   = regexp.MustCompile(`^\+\s*(?:if|}\s*else\s+if)\s+\w+\s*:?=\s*(\w+)\(`)
+	reLogging       = regexp.MustCompile(`^\+.*(?:log\.\w+\(|logger\.\w+\(|console\.log\(|println!\()`)
+	reRmLogging     = regexp.MustCompile(`^-.*(?:console\.log\(|println!\(|log\.Debug\(|log\.Printf\(|log\.Println\()`)
+	reRmPrint       = regexp.MustCompile(`^-\s*fmt\.Print(?:f|ln)?\(`)
 	reTest          = regexp.MustCompile(`^\+.*(?:func Test|it\(|describe\(|test\(|assert|expect\()`)
 	reComment       = regexp.MustCompile(`^\+\s*(?://|#|/\*|\*)`)
 )
@@ -193,11 +232,69 @@ func analyzeDiffWithBranch(diff string, branch string) analysis {
 			a.removedVars = appendUnique(a.removedVars, v)
 		}
 
-		if reErrorHandling.MatchString(line) {
+		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+			a.linesAdded++
+		}
+		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+			a.linesRemoved++
+		}
+
+		if strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") {
+			if m := reVersion.FindString(line); m != "" {
+				if strings.HasPrefix(line, "+") {
+					a.detectedVersions = appendUnique(a.detectedVersions, m)
+				}
+			}
+		}
+
+		ext := strings.ToLower(filepath.Ext(currentFile))
+		if ext == ".html" || ext == ".htm" {
+			if m := reHTMLTag.FindStringSubmatch(line); len(m) > 1 {
+				a.htmlElements = appendUnique(a.htmlElements, m[1])
+			}
+			if m := reHTMLId.FindStringSubmatch(line); len(m) > 1 {
+				a.htmlElements = appendUnique(a.htmlElements, m[1])
+			}
+		}
+		if ext == ".css" || ext == ".scss" || ext == ".less" || ext == ".sass" {
+			if m := reCSSClass.FindStringSubmatch(line); len(m) > 1 {
+				a.cssClasses = appendUnique(a.cssClasses, m[1])
+			}
+			if m := reCSSVar.FindStringSubmatch(line); len(m) > 1 {
+				a.cssClasses = appendUnique(a.cssClasses, "--"+m[1])
+			}
+		}
+		if ext == ".sh" || ext == ".bash" || ext == ".zsh" || ext == ".fish" {
+			if m := reFuncSh.FindStringSubmatch(line); len(m) > 1 {
+				a.shellFuncs = appendUnique(a.shellFuncs, m[1])
+			}
+		}
+		if ext == ".sql" {
+			if m := reSQLFunc.FindStringSubmatch(line); len(m) > 1 {
+				a.addedFuncs = appendUnique(a.addedFuncs, m[1])
+			}
+			if m := reSQLCreate.FindStringSubmatch(line); len(m) > 1 {
+				a.sqlTables = appendUnique(a.sqlTables, m[1])
+			}
+			if m := reSQLAlter.FindStringSubmatch(line); len(m) > 1 {
+				a.sqlTables = appendUnique(a.sqlTables, m[1])
+			}
+			if m := reSQLDrop.FindStringSubmatch(line); len(m) > 1 {
+				a.removedFuncs = appendUnique(a.removedFuncs, m[1])
+			}
+		}
+
+		if reErrorHandling.MatchString(line) || reErrInline.MatchString(line) {
 			a.patterns = appendUnique(a.patterns, "error-handling")
+			if m := reErrFuncCall.FindStringSubmatch(line); len(m) > 1 && len(m[1]) > 4 {
+				a.errFuncs = appendUnique(a.errFuncs, m[1])
+			}
 		}
 		if reRmLogging.MatchString(line) {
 			a.patterns = appendUnique(a.patterns, "remove-debug-logs")
+		}
+		if reRmPrint.MatchString(line) {
+			a.removedPrints++
 		}
 		if reLogging.MatchString(line) {
 			a.patterns = appendUnique(a.patterns, "logging")
@@ -270,6 +367,21 @@ func categorizeFile(a *analysis, path string) {
 		a.isDocsOnly = true
 		return
 	}
+	if isHTMLFile(path) || isCSSFile(path) || isShellFile(path) ||
+		isPHPFile(path) || isCFile(path) || isVueFile(path) || isSvelteFile(path) {
+		a.filesModified = appendUnique(a.filesModified, path)
+		a.isTestOnly = false
+		a.isDocsOnly = false
+		a.isConfigOnly = false
+		return
+	}
+	if isSQLFile(path) {
+		a.filesModified = appendUnique(a.filesModified, path)
+		a.isTestOnly = false
+		a.isDocsOnly = false
+		a.isConfigOnly = false
+		return
+	}
 	if isConfigFile(path) {
 		a.filesModified = appendUnique(a.filesModified, path)
 		a.isConfigOnly = true
@@ -307,6 +419,20 @@ func extractVarName(line, file string, added bool) string {
 	}
 
 	if re == nil {
+		if ext == ".go" {
+			var blockRe *regexp.Regexp
+			if added {
+				blockRe = reVarGoBlock
+			} else {
+				blockRe = reVarGoBlockRm
+			}
+			if m := blockRe.FindStringSubmatch(line); len(m) > 1 {
+				name := m[1]
+				if len(name) > 1 {
+					return name
+				}
+			}
+		}
 		return ""
 	}
 	if m := re.FindStringSubmatch(line); len(m) > 1 {
@@ -358,8 +484,12 @@ func extractFuncName(line, file string, added bool) string {
 		switch ext {
 		case ".go":
 			patterns = []*regexp.Regexp{reFuncGo}
-		case ".js", ".ts", ".jsx", ".tsx":
+		case ".js", ".jsx":
 			patterns = []*regexp.Regexp{reFuncJS, reArrowJS}
+		case ".ts", ".tsx":
+			patterns = []*regexp.Regexp{reFuncJS, reArrowJS, reTSType}
+		case ".vue", ".svelte":
+			patterns = []*regexp.Regexp{reFuncJS, reArrowJS, reTSType}
 		case ".py":
 			patterns = []*regexp.Regexp{reFuncPy, reClassPy}
 		case ".rb":
@@ -368,17 +498,31 @@ func extractFuncName(line, file string, added bool) string {
 			patterns = []*regexp.Regexp{reFuncRs}
 		case ".java", ".kt":
 			patterns = []*regexp.Regexp{reFuncJava}
+		case ".php":
+			patterns = []*regexp.Regexp{reFuncPHP}
+		case ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp":
+			patterns = []*regexp.Regexp{reFuncC}
+		case ".sh", ".bash", ".zsh", ".fish":
+			patterns = []*regexp.Regexp{reFuncSh}
 		}
 	} else {
 		switch ext {
 		case ".go":
 			patterns = []*regexp.Regexp{reRmFuncGo}
-		case ".js", ".ts", ".jsx", ".tsx":
+		case ".js", ".jsx":
 			patterns = []*regexp.Regexp{reRmFuncJS}
+		case ".ts", ".tsx":
+			patterns = []*regexp.Regexp{reRmFuncJS, reRmTSType}
+		case ".vue", ".svelte":
+			patterns = []*regexp.Regexp{reRmFuncJS, reRmTSType}
 		case ".py":
 			patterns = []*regexp.Regexp{reRmFuncPy}
 		case ".rs":
 			patterns = []*regexp.Regexp{reRmFuncRs}
+		case ".php":
+			patterns = []*regexp.Regexp{reRmFuncPHP}
+		case ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp":
+			patterns = []*regexp.Regexp{reRmFuncC}
 		}
 	}
 
@@ -424,11 +568,22 @@ func inferScope(a analysis) string {
 
 	best := ""
 	bestScore := 0
+	tieCount := 0
 	for k, v := range scores {
-		if v > bestScore || (v == bestScore && k < best) {
+		if v > bestScore {
 			best = k
 			bestScore = v
+			tieCount = 1
+		} else if v == bestScore {
+			tieCount++
+			if k < best {
+				best = k
+			}
 		}
+	}
+
+	if bestScore == 1 && tieCount > 1 {
+		return ""
 	}
 
 	if len(best) > 20 {
@@ -456,6 +611,26 @@ func inferType(a analysis) string {
 		if strings.HasPrefix(hint, "test/") {
 			return "test"
 		}
+	}
+
+	if len(a.detectedVersions) > 0 && len(a.addedFuncs) == 0 && len(a.removedFuncs) == 0 {
+		return "chore"
+	}
+
+	if a.removedPrints > 0 && len(a.addedFuncs) == 0 && len(a.removedFuncs) == 0 && !contains(a.patterns, "error-handling") {
+		return "chore"
+	}
+
+	if len(a.addedFuncs) == 0 && len(a.removedFuncs) == 0 && a.linesRemoved > a.linesAdded {
+		return "fix"
+	}
+
+	if len(a.htmlElements) > 0 {
+		return "feat"
+	}
+
+	if len(a.cssClasses) > 0 {
+		return "feat"
 	}
 
 	if a.isRenameOnly {
@@ -573,4 +748,84 @@ func firstN(slice []string, n int) []string {
 		return slice
 	}
 	return slice[:n]
+}
+
+func isHTMLFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	for _, p := range htmlFilePatterns {
+		if ext == p {
+			return true
+		}
+	}
+	return false
+}
+
+func isCSSFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	for _, p := range cssFilePatterns {
+		if ext == p {
+			return true
+		}
+	}
+	return false
+}
+
+func isShellFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	for _, p := range shellFilePatterns {
+		if ext == p {
+			return true
+		}
+	}
+	return false
+}
+
+func isPHPFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	for _, p := range phpFilePatterns {
+		if ext == p {
+			return true
+		}
+	}
+	return false
+}
+
+func isCFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	for _, p := range cFilePatterns {
+		if ext == p {
+			return true
+		}
+	}
+	return false
+}
+
+func isVueFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	for _, p := range vueFilePatterns {
+		if ext == p {
+			return true
+		}
+	}
+	return false
+}
+
+func isSvelteFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	for _, p := range svelteFilePatterns {
+		if ext == p {
+			return true
+		}
+	}
+	return false
+}
+
+func isSQLFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	for _, p := range sqlFilePatterns {
+		if ext == p {
+			return true
+		}
+	}
+	return false
 }

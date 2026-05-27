@@ -35,11 +35,11 @@ func runUpdateBrew() {
 
 	fmt.Printf("  %-38s", "updating homebrew tap...")
 	if err := updateHomebrew(cfg.GitHub.Token, ver, repo, sha256map); err != nil {
-		fmt.Printf("\033[31m✗\033[0m\n")
+		fmt.Printf("%s\n", colorRed("✗"))
 		fatal("%s", err)
 	}
-	fmt.Printf("\033[32m✓\033[0m\n")
-	fmt.Printf("\n  \033[32m✓ homebrew tap updated\033[0m\n\n")
+	fmt.Printf("%s\n", colorGreen("✓"))
+	fmt.Printf("\n  %s\n\n", colorGreen("✓ homebrew tap updated"))
 }
 
 func runUpdateAUR() {
@@ -65,11 +65,11 @@ func runUpdateAUR() {
 
 	fmt.Printf("  %-38s", "updating AUR PKGBUILD...")
 	if err := updateAUR(ver, repo, sha256map); err != nil {
-		fmt.Printf("\033[31m✗\033[0m\n")
+		fmt.Printf("%s\n", colorRed("✗"))
 		fatal("%s", err)
 	}
-	fmt.Printf("\033[32m✓\033[0m\n")
-	fmt.Printf("\n  \033[32m✓ AUR updated\033[0m\n\n")
+	fmt.Printf("%s\n", colorGreen("✓"))
+	fmt.Printf("\n  %s\n\n", colorGreen("✓ AUR updated"))
 }
 
 func fetchChecksums(token, repo, ver string) (map[string]string, error) {

@@ -132,7 +132,7 @@ func runRevert() {
 	}
 
 	fmt.Printf("\n  ✓ reverted %s\n", chosen[:7])
-	askPush()
+	askPush("")
 }
 
 func pickCommit(commits []commitEntry) (string, bool) {
@@ -211,7 +211,7 @@ func handleRevertInProgress() {
 				os.Exit(1)
 			}
 			fmt.Println("\n  ✓ revert completed")
-			askPush()
+			askPush("")
 			return
 		case "a", "abort":
 			if err := gitRevertAbort(); err != nil {
@@ -438,16 +438,4 @@ func subjectForHash(hash string, commits []commitEntry) string {
 		}
 	}
 	return ""
-}
-
-func colorRed(s string) string {
-	return "\033[31m" + s + "\033[0m"
-}
-
-func colorDim(s string) string {
-	return "\033[2m" + s + "\033[0m"
-}
-
-func colorMuted(s string) string {
-	return "\033[90m" + s + "\033[0m"
 }

@@ -95,6 +95,7 @@ func isHTTPSAuthError(msg string) bool {
 }
 
 func tryFixHTTPSRemote(remote, branch string) error {
+	// get current remote URL
 	cmd := exec.Command("git", "remote", "get-url", remote)
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -107,6 +108,7 @@ func tryFixHTTPSRemote(remote, branch string) error {
 		return fmt.Errorf("push failed: authentication error")
 	}
 
+	// convert https://github.com/user/repo.git → git@github.com:user/repo.git
 	sshURL := strings.Replace(currentURL, "https://github.com/", "git@github.com:", 1)
 
 	fmt.Println()
@@ -122,6 +124,7 @@ func tryFixHTTPSRemote(remote, branch string) error {
 		return fmt.Errorf("push aborted")
 	}
 
+	// switch remote to SSH
 	setCmd := exec.Command("git", "remote", "set-url", remote, sshURL)
 	var stderr bytes.Buffer
 	setCmd.Stderr = &stderr
@@ -132,6 +135,7 @@ func tryFixHTTPSRemote(remote, branch string) error {
 	fmt.Printf("  ✓ remote switched to SSH\n")
 	fmt.Printf("  retrying push...\n")
 
+	// retry push
 	pushCmd := exec.Command("git", "push", remote, branch)
 	var pushStderr bytes.Buffer
 	pushCmd.Stderr = &pushStderr
@@ -143,11 +147,15 @@ func tryFixHTTPSRemote(remote, branch string) error {
 
 func sanitizeMessage(s string) string {
 	s = strings.ReplaceAll(s, "\x00", "")
-
-	s = strings.TrimSpace(s)
-	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", "")
-	return s
+	s = strings.TrimSpace(s)
+
+	parts := strings.SplitN(s, "\n\n", 2)
+	parts[0] = strings.ReplaceAll(parts[0], "\n", " ")
+	if len(parts) == 2 {
+		return parts[0] + "\n\n" + strings.TrimSpace(parts[1])
+	}
+	return parts[0]
 }
 
 func isSafeGitRef(s string) bool {
@@ -267,11 +275,7 @@ func authHeaderForPlatform(token string) string {
 func currentAuthHeader() string {
 	c := loadConfig()
 	proj := loadProjectConfig()
-	platform := proj.platform
-	if platform == "" {
-		platform = "github"
-	}
-	return authHeaderForPlatform(tokenForPlatform(c, platform))
+	return authHeaderForPlatform(tokenForPlatform(c, proj.effectivePrimary()))
 }
 
 func runPushWithAuth(remote, branch, authHeader string) error {
@@ -333,4 +337,74 @@ func runPushTagsWithAuth(remote, branch, authHeader string) error {
 		return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
 	}
 	return nil
+}
+
+func platformRemoteName(platform string) string {
+	return platform
+}
+
+func primaryRemoteName(platform string) string {
+	if platform == "github" || platform == "" {
+		return "origin"
+	}
+	return platform
+}
+
+func remoteForPlatform(platform string) string {
+	proj := loadProjectConfig()
+	primary := proj.effectivePrimary()
+	if platform == "" || platform == primary {
+		return primaryRemoteName(primary)
+	}
+	return platformRemoteName(platform)
+}
+
+func authHeaderForPlatformName(platform string) string {
+	c := loadConfig()
+	return authHeaderForPlatform(tokenForPlatform(c, platform))
+}
+
+func gitAddRemote(name, url string) error {
+	if !isSafeGitRef(name) {
+		return fmt.Errorf("invalid remote name")
+	}
+	cmd := exec.Command("git", "remote", "add", name, url)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func hasUnpushedCommits(remote, branch string) bool {
+	if !isSafeGitRef(remote) || !isSafeGitRef(branch) {
+		return false
+	}
+	cmd := exec.Command("git", "log", remote+"/"+branch+"..HEAD", "--oneline")
+	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		refCheck := exec.Command("git", "rev-parse", "--verify", remote+"/"+branch)
+		if refCheck.Run() != nil {
+			countCmd := exec.Command("git", "rev-list", "--count", "HEAD")
+			var countOut bytes.Buffer
+			countCmd.Stdout = &countOut
+			if countCmd.Run() == nil && strings.TrimSpace(countOut.String()) != "0" {
+				return true
+			}
+		}
+		return false
+	}
+	return strings.TrimSpace(out.String()) != ""
+}
+
+func remoteExists(name string) bool {
+	for _, r := range getRemotes() {
+		if r == name {
+			return true
+		}
+	}
+	return false
 }

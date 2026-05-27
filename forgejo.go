@@ -209,3 +209,44 @@ func uploadForgejoAssetsBatched(token, host, owner, repo string, releaseID int64
 	}
 	return nil
 }
+
+func listForgejoPRs(token, host, owner, repo string) ([]prEntry, error) {
+	body, err := forgejoRequest("GET", "/repos/"+owner+"/"+repo+"/pulls?state=open&limit=20", token, host, nil)
+	if err != nil {
+		return nil, err
+	}
+	var prs []prEntry
+	if err := json.Unmarshal(body, &prs); err != nil {
+		return nil, err
+	}
+	return prs, nil
+}
+
+func createForgejoPR(token, host, owner, repo, title, desc, head, base string) (prEntry, error) {
+	payload := map[string]string{
+		"title": title,
+		"body":  desc,
+		"head":  head,
+		"base":  base,
+	}
+	resp, err := forgejoRequest("POST", "/repos/"+owner+"/"+repo+"/pulls", token, host, payload)
+	if err != nil {
+		return prEntry{}, err
+	}
+	var pr prEntry
+	if err := json.Unmarshal(resp, &pr); err != nil {
+		return prEntry{}, err
+	}
+	return pr, nil
+}
+
+func mergeForgejoPR(token, host, owner, repo string, number int, method string) error {
+	payload := map[string]string{"Do": method}
+	_, err := forgejoRequest("POST", fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, number), token, host, payload)
+	return err
+}
+
+func deleteForgejoBranch(token, host, owner, repo, branch string) error {
+	_, err := forgejoRequest("DELETE", "/repos/"+owner+"/"+repo+"/branches/"+branch, token, host, nil)
+	return err
+}

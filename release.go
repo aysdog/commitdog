@@ -186,9 +186,11 @@ func runRelease() {
 		fatal("not a git repository.")
 	}
 
-	if len(os.Args) > 2 {
-		switch os.Args[2] {
-		case "--changelog-only":
+	releaseAll := false
+	mirrorOnly := ""
+	for _, arg := range os.Args[2:] {
+		switch arg {
+		case "--changelog-only", "-changelog-only":
 			cl := buildChangelog(getLatestGitTag())
 			fmt.Println()
 			fmt.Println(cl)
@@ -196,12 +198,28 @@ func runRelease() {
 		case "config":
 			runReleaseConfig()
 			return
+		case "--all", "-all":
+			releaseAll = true
+		case "-gh":
+			mirrorOnly = "github"
+		case "-gl":
+			mirrorOnly = "gitlab"
+		case "-gt":
+			mirrorOnly = "gitea"
+		case "-fg":
+			mirrorOnly = "forgejo"
 		}
 	}
 
 	cfg := loadConfig()
 	proj2 := loadProjectConfig()
-	platform := proj2.platform
+
+	if mirrorOnly != "" {
+		runMirrorRelease(cfg, proj2, mirrorOnly)
+		return
+	}
+
+	platform := proj2.effectivePrimary()
 	if platform == "" {
 		platform = "github"
 	}
@@ -209,7 +227,6 @@ func runRelease() {
 	if token == "" {
 		fatal("no %s token found. run 'commitdog setup' first.", platform)
 	}
-
 	owner, repo := getRepoOwnerAndName()
 	if owner == "" || repo == "" {
 		fatal("could not detect %s repo.", platform)
@@ -225,6 +242,38 @@ func runRelease() {
 	}
 
 	gitTag := getLatestGitTag()
+
+	if gitTag == "" && hasRemoteTags() {
+		fmt.Println()
+		fmt.Println("  no local tags found but remote has tags.")
+		fmt.Println()
+		fmt.Println("  1  mirror repo — fetch tags from remote")
+		fmt.Println("  2  new repo — start fresh")
+		fmt.Println()
+		fmt.Printf("  [1/2/q] pick › ")
+		for {
+			switch strings.TrimSpace(readLine()) {
+			case "1":
+				fmt.Printf("  fetching tags...")
+				if err := fetchTags(); err != nil {
+					fmt.Println()
+					fatal("could not fetch tags: %v", err)
+				}
+				fmt.Println(" done")
+				gitTag = getLatestGitTag()
+			case "2":
+			case "q", "":
+				fmt.Println("  aborted.")
+				return
+			default:
+				fmt.Printf("  1, 2, or q › ")
+				continue
+			}
+			break
+		}
+		fmt.Println()
+	}
+
 	if gitTag != "" && fileVer != gitTag {
 		fmt.Printf("\n  %s version drift: %s says v%s but latest git tag is v%s\n", colorRed("!"), proj.file, fileVer, gitTag)
 		fmt.Printf("  release anyway? [y/N] › ")
@@ -240,7 +289,7 @@ func runRelease() {
 	}
 
 	fmt.Println()
-	fmt.Printf("  detected: \033[36m%s\033[0m  ·  current version: \033[1mv%s\033[0m\n\n", proj.lang, currentVer)
+	fmt.Printf("  detected: %s  ·  current version: %s\n\n", colorCyan(proj.lang), colorBold("v"+currentVer))
 
 	major, minor, patch := splitVer(currentVer)
 	fmt.Printf("  1  patch  →  v%d.%d.%d\n", major, minor, patch+1)
@@ -277,14 +326,33 @@ func runRelease() {
 		break
 	}
 
-	changelog := buildChangelog(currentVer)
+	bc, bcErr := collectBranchChanges("HEAD", "v"+currentVer)
+	var changelog string
+	if bcErr == nil && bc.total > 0 {
+		changelog = generateReleaseNotes("v"+nextVer, bc)
+	} else {
+		changelog = buildChangelog(currentVer)
+	}
+
 	fmt.Println()
-	fmt.Println("  changelog preview:")
-	fmt.Println()
+	fmt.Println(colorMuted("  ─────────────────────────────────"))
 	for _, line := range strings.Split(changelog, "\n") {
 		fmt.Println("  " + line)
 	}
+	fmt.Println(colorMuted("  ─────────────────────────────────"))
 	fmt.Println()
+	fmt.Printf("  [enter] use as-is  [e] edit  [q] cancel › ")
+	input := strings.ToLower(strings.TrimSpace(readLine()))
+	if input == "q" {
+		fmt.Println("  aborted.")
+		return
+	}
+	if input == "e" {
+		edited, err := openInEditor(changelog)
+		if err == nil {
+			changelog = strings.TrimSpace(edited)
+		}
+	}
 	fmt.Printf("  release v%s → v%s? [y/n] › ", currentVer, nextVer)
 	if confirm := readLine(); confirm != "y" && confirm != "yes" {
 		fmt.Println("  aborted.")
@@ -294,6 +362,7 @@ func runRelease() {
 
 	preReleaseHash, _ := exec.Command("git", "rev-parse", "HEAD").Output()
 	preRelease := strings.TrimSpace(string(preReleaseHash))
+	branch := getCurrentBranch()
 
 	var undos []undoStep
 
@@ -358,26 +427,61 @@ func runRelease() {
 
 	authHeader := authHeaderForPlatform(token)
 	printStepOrRollback("pushing...", &undos, func() error {
-		return runPushTagsWithAuth("origin", "main", authHeader)
+		return runPushTagsWithAuth("origin", branch, authHeader)
 	}, func() error {
 		exec.Command("git", "push", "origin", ":refs/tags/v"+nextVer).Run()
 		if preRelease != "" {
-			exec.Command("git", "push", "origin", preRelease+":main", "--force").Run()
+			exec.Command("git", "push", "origin", preRelease+":"+branch, "--force").Run()
 		}
 		return nil
 	})
 
-	releaseURL := platformRelease(cfg, platform, owner, repo, nextVer, changelog, isGo, binaries, &undos)
+	checksumFile := buildChecksums(binaries)
+	releaseURL := platformRelease(cfg, platform, owner, repo, nextVer, changelog, isGo, binaries, checksumFile, &undos)
+
+	if releaseAll {
+		proj2 = loadProjectConfig()
+		for _, mirror := range proj2.mirrors {
+			var mirrorUndos []undoStep
+			mirrorRemote := platformRemoteName(mirror)
+			mirrorAuth := authHeaderForPlatformName(mirror)
+			printStepOrRollback("pushing tags to "+mirror+"...", &mirrorUndos, func() error {
+				return runPushTagsWithAuth(mirrorRemote, branch, mirrorAuth)
+			}, nil)
+			mirrorOwner, mirrorRepo := getMirrorOwnerRepo(mirrorRemote)
+			if mirrorOwner == "" || mirrorRepo == "" {
+				fmt.Printf("  %s could not resolve owner/repo for %s — skipping\n", colorYellow("⚠"), mirror)
+				continue
+			}
+			mirrorURL := platformRelease(cfg, mirror, mirrorOwner, mirrorRepo, nextVer, changelog, isGo, binaries, checksumFile, &mirrorUndos)
+			fmt.Printf("  %s\n", mirrorURL)
+		}
+	}
+
+	for _, bin := range binaries {
+		os.Remove(bin)
+	}
+	os.Remove("checksums.txt")
 
 	fmt.Println()
-	fmt.Printf("  \033[32m✓ v%s released\033[0m\n", nextVer)
+	fmt.Printf("  %s\n", colorGreen("✓ v"+nextVer+" released"))
 	fmt.Printf("  %s\n\n", releaseURL)
+}
+
+func getMirrorOwnerRepo(remote string) (string, string) {
+	cmd := exec.Command("git", "remote", "get-url", remote)
+	var out strings.Builder
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return "", ""
+	}
+	return parseRemoteOwnerAndName(strings.TrimSpace(out.String()))
 }
 
 func printStepOrRollback(label string, undos *[]undoStep, fn func() error, undo func() error) {
 	fmt.Printf("  %-38s", label)
 	if err := fn(); err != nil {
-		fmt.Printf("\033[31m✗\033[0m\n")
+		fmt.Printf("%s\n", colorRed("✗"))
 		fmt.Printf("\n  %s step failed: %s\n", colorRed("✗"), err)
 		if len(*undos) > 0 {
 			fmt.Printf("\n  rolling back %d step(s)...\n", len(*undos))
@@ -396,7 +500,7 @@ func printStepOrRollback(label string, undos *[]undoStep, fn func() error, undo 
 		fmt.Println()
 		os.Exit(1)
 	}
-	fmt.Printf("\033[32m✓\033[0m\n")
+	fmt.Printf("%s\n", colorGreen("✓"))
 	if undo != nil {
 		*undos = append(*undos, undoStep{label: strings.TrimSuffix(label, "..."), fn: undo})
 	}
@@ -510,7 +614,7 @@ func uploadReleaseAsset(token, uploadURL, path string) error {
 	return nil
 }
 
-func buildChecksums(binaries []string) (string, []string) {
+func buildChecksums(binaries []string) string {
 	var lines []string
 	for _, bin := range binaries {
 		sum := fileSHA256(bin)
@@ -519,29 +623,29 @@ func buildChecksums(binaries []string) (string, []string) {
 		}
 	}
 	if len(lines) == 0 {
-		return "", nil
+		return ""
 	}
 	checksumFile := "checksums.txt"
 	os.WriteFile(checksumFile, []byte(strings.Join(lines, "\n")+"\n"), 0644)
-	return checksumFile, lines
+	return checksumFile
 }
 
-func platformRelease(cfg config, platform, owner, repo, nextVer, changelog string, isGo bool, binaries []string, undos *[]undoStep) string {
+func platformRelease(cfg config, platform, owner, repo, nextVer, changelog string, isGo bool, binaries []string, checksumFile string, undos *[]undoStep) string {
 	token := tokenForPlatform(cfg, platform)
 
 	switch platform {
 	case "gitlab":
-		return releaseGitLab(cfg, token, owner, repo, nextVer, changelog, isGo, binaries, undos)
+		return releaseGitLab(cfg, token, owner, repo, nextVer, changelog, isGo, binaries, checksumFile, undos)
 	case "gitea":
-		return releaseGitea(token, cfg.Gitea.Host, owner, repo, nextVer, changelog, isGo, binaries, undos)
+		return releaseGitea(token, cfg.Gitea.Host, owner, repo, nextVer, changelog, isGo, binaries, checksumFile, undos)
 	case "forgejo":
-		return releaseForgejo(token, cfg.Forgejo.Host, owner, repo, nextVer, changelog, isGo, binaries, undos)
+		return releaseForgejo(token, cfg.Forgejo.Host, owner, repo, nextVer, changelog, isGo, binaries, checksumFile, undos)
 	default:
-		return releaseGitHub(token, owner, repo, nextVer, changelog, isGo, binaries, undos)
+		return releaseGitHub(token, owner, repo, nextVer, changelog, isGo, binaries, checksumFile, undos)
 	}
 }
 
-func releaseGitHub(token, owner, repo, nextVer, changelog string, isGo bool, binaries []string, undos *[]undoStep) string {
+func releaseGitHub(token, owner, repo, nextVer, changelog string, isGo bool, binaries []string, checksumFile string, undos *[]undoStep) string {
 	var releaseID int64
 	var uploadURL string
 	printStepOrRollback("creating GitHub release...", undos, func() error {
@@ -563,28 +667,23 @@ func releaseGitHub(token, owner, repo, nextVer, changelog string, isGo bool, bin
 	})
 
 	if isGo && uploadURL != "" {
-		checksumFile, _ := buildChecksums(binaries)
 		for _, bin := range binaries {
 			b := bin
 			printStepOrRollback("uploading "+b+"...", undos, func() error {
 				return uploadReleaseAsset(token, uploadURL, b)
 			}, nil)
 		}
-		for _, bin := range binaries {
-			os.Remove(bin)
-		}
 		if checksumFile != "" {
 			printStepOrRollback("uploading checksums.txt...", undos, func() error {
 				return uploadReleaseAsset(token, uploadURL, checksumFile)
 			}, nil)
-			os.Remove(checksumFile)
 		}
 	}
 
 	return fmt.Sprintf("https://github.com/%s/%s/releases/tag/v%s", owner, repo, nextVer)
 }
 
-func releaseGitLab(cfg config, token, owner, repo, nextVer, changelog string, isGo bool, binaries []string, undos *[]undoStep) string {
+func releaseGitLab(cfg config, token, owner, repo, nextVer, changelog string, isGo bool, binaries []string, checksumFile string, undos *[]undoStep) string {
 	host := gitlabHost(cfg)
 
 	var projectID string
@@ -606,7 +705,6 @@ func releaseGitLab(cfg config, token, owner, repo, nextVer, changelog string, is
 	})
 
 	if isGo && projectID != "" {
-		checksumFile, _ := buildChecksums(binaries)
 		allFiles := append(binaries, checksumFile)
 		for _, bin := range allFiles {
 			if bin == "" {
@@ -621,18 +719,12 @@ func releaseGitLab(cfg config, token, owner, repo, nextVer, changelog string, is
 				return addGitLabReleaseLink(token, host, projectID, nextVer, filepath.Base(b), pkgURL)
 			}, nil)
 		}
-		for _, bin := range binaries {
-			os.Remove(bin)
-		}
-		if checksumFile != "" {
-			os.Remove(checksumFile)
-		}
 	}
 
 	return fmt.Sprintf("%s/%s/%s/-/releases/v%s", host, owner, repo, nextVer)
 }
 
-func releaseGitea(token, host, owner, repo, nextVer, changelog string, isGo bool, binaries []string, undos *[]undoStep) string {
+func releaseGitea(token, host, owner, repo, nextVer, changelog string, isGo bool, binaries []string, checksumFile string, undos *[]undoStep) string {
 	var releaseID int64
 	printStepOrRollback("creating Gitea release...", undos, func() error {
 		id, err := createGiteaRelease(token, host, owner, repo, nextVer, changelog)
@@ -652,10 +744,8 @@ func releaseGitea(token, host, owner, repo, nextVer, changelog string, isGo bool
 	})
 
 	if isGo && releaseID != 0 {
-		checksumFile, _ := buildChecksums(binaries)
-		allFiles := append(binaries, checksumFile)
 		var toUpload []string
-		for _, f := range allFiles {
+		for _, f := range append(binaries, checksumFile) {
 			if f != "" {
 				toUpload = append(toUpload, f)
 			}
@@ -663,18 +753,12 @@ func releaseGitea(token, host, owner, repo, nextVer, changelog string, isGo bool
 		printStepOrRollback("uploading assets...", undos, func() error {
 			return uploadGiteaAssetsBatched(token, host, owner, repo, releaseID, toUpload)
 		}, nil)
-		for _, bin := range binaries {
-			os.Remove(bin)
-		}
-		if checksumFile != "" {
-			os.Remove(checksumFile)
-		}
 	}
 
 	return fmt.Sprintf("%s/%s/%s/releases/tag/v%s", host, owner, repo, nextVer)
 }
 
-func releaseForgejo(token, host, owner, repo, nextVer, changelog string, isGo bool, binaries []string, undos *[]undoStep) string {
+func releaseForgejo(token, host, owner, repo, nextVer, changelog string, isGo bool, binaries []string, checksumFile string, undos *[]undoStep) string {
 	var releaseID int64
 	printStepOrRollback("creating Forgejo release...", undos, func() error {
 		id, err := createForgejoRelease(token, host, owner, repo, nextVer, changelog)
@@ -694,10 +778,8 @@ func releaseForgejo(token, host, owner, repo, nextVer, changelog string, isGo bo
 	})
 
 	if isGo && releaseID != 0 {
-		checksumFile, _ := buildChecksums(binaries)
-		allFiles := append(binaries, checksumFile)
 		var toUpload []string
-		for _, f := range allFiles {
+		for _, f := range append(binaries, checksumFile) {
 			if f != "" {
 				toUpload = append(toUpload, f)
 			}
@@ -705,13 +787,104 @@ func releaseForgejo(token, host, owner, repo, nextVer, changelog string, isGo bo
 		printStepOrRollback("uploading assets...", undos, func() error {
 			return uploadForgejoAssetsBatched(token, host, owner, repo, releaseID, toUpload)
 		}, nil)
-		for _, bin := range binaries {
-			os.Remove(bin)
-		}
-		if checksumFile != "" {
-			os.Remove(checksumFile)
-		}
 	}
 
 	return fmt.Sprintf("%s/%s/%s/releases/tag/v%s", host, owner, repo, nextVer)
+}
+
+func hasRemoteTags() bool {
+	cmd := exec.Command("git", "ls-remote", "--tags", "origin")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	return strings.TrimSpace(out.String()) != ""
+}
+
+func fetchTags() error {
+	cmd := exec.Command("git", "fetch", "--tags", "origin")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func runMirrorRelease(cfg config, proj projectConfig, platform string) {
+	token := tokenForPlatform(cfg, platform)
+	if token == "" {
+		fatal("no %s token found. run 'commitdog setup' first.", platform)
+	}
+
+	gitTag := getLatestGitTag()
+	if gitTag == "" {
+		fatal("no git tag found. run 'commitdog release' first to create a release.")
+	}
+
+	remote := platformRemoteName(platform)
+	if !remoteExists(remote) {
+		fatal("remote '%s' not configured. run 'commitdog init' to add %s as a mirror.", remote, platform)
+	}
+
+	fmt.Println()
+	fmt.Printf("  publishing v%s to %s\n\n", gitTag, platform)
+
+	authHeader := authHeaderForPlatformName(platform)
+	printStepOrRollback("pushing tags to "+platform+"...", nil, func() error {
+		return runPushTagsWithAuth(remote, getCurrentBranch(), authHeader)
+	}, nil)
+
+	owner, repo := getMirrorOwnerRepo(remote)
+	if owner == "" || repo == "" {
+		fatal("could not detect repo owner and name from remote '%s'.", remote)
+	}
+
+	changelog := buildChangelog(gitTag)
+
+	proj2 := loadProjectConfig()
+	isGo := false
+	if p, _ := detectProject(); p != nil && p.lang == "Go" {
+		isGo = true
+	}
+
+	var binaries []string
+	var undos []undoStep
+	if isGo {
+		targets := resolveTargets(proj2.targets)
+		if len(targets) == 0 {
+			targets = allBuildTargets
+		}
+		for _, t := range targets {
+			name := fmt.Sprintf("%s-%s-%s%s", repo, t.goos, t.goarch, t.suffix)
+			label := fmt.Sprintf("building %s/%s...", t.goos, t.goarch)
+			goos, goarch, n := t.goos, t.goarch, name
+			printStepOrRollback(label, &undos, func() error {
+				cmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", n, ".")
+				cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch)
+				var stderr bytes.Buffer
+				cmd.Stderr = &stderr
+				if err := cmd.Run(); err != nil {
+					return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
+				}
+				return nil
+			}, func() error {
+				os.Remove(n)
+				return nil
+			})
+			binaries = append(binaries, name)
+		}
+	}
+
+	releaseURL := platformRelease(cfg, platform, owner, repo, gitTag, changelog, isGo, binaries, buildChecksums(binaries), &undos)
+
+	for _, bin := range binaries {
+		os.Remove(bin)
+	}
+	os.Remove("checksums.txt")
+
+	fmt.Println()
+	fmt.Printf("  %s\n", colorGreen("✓ v"+gitTag+" published to "+platform))
+	fmt.Printf("  %s\n\n", releaseURL)
 }

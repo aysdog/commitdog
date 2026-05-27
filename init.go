@@ -3,17 +3,22 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
 func runInit() {
 	fmt.Println()
-	fmt.Println("  commitdog init")
-	fmt.Println()
 
 	c := loadConfig()
 	proj := loadProjectConfig()
+
+	if proj.effectivePrimary() != "" {
+		handleConfiguredRepo(proj, c)
+		return
+	}
+
 	platform := proj.platform
 
 	if platform == "" {
@@ -262,4 +267,482 @@ func isSafeRepoName(s string) bool {
 		}
 	}
 	return true
+}
+
+func handleConfiguredRepo(proj projectConfig, c config) {
+	primary := proj.effectivePrimary()
+	fmt.Println()
+	fmt.Printf("  this repo is configured for %s.\n", primary)
+	if len(proj.mirrors) > 0 {
+		fmt.Printf("  mirrors: %s\n", strings.Join(proj.mirrors, ", "))
+	}
+	fmt.Println()
+	fmt.Println("  1  change platform")
+	fmt.Println("  2  add mirror")
+	if len(proj.mirrors) > 0 {
+		fmt.Println("  3  remove mirror")
+		fmt.Println("  4  cancel")
+		fmt.Println()
+		fmt.Printf("  [1/2/3/4] pick › ")
+	} else {
+		fmt.Println("  3  cancel")
+		fmt.Println()
+		fmt.Printf("  [1/2/3] pick › ")
+	}
+
+	switch strings.TrimSpace(readLine()) {
+	case "1":
+		changePrimaryPlatform(proj)
+	case "2":
+		addMirrorPlatform(proj, c)
+	case "3":
+		if len(proj.mirrors) > 0 {
+			removeMirrorPlatform(proj)
+		} else {
+			fmt.Println("  cancelled.")
+		}
+	case "4":
+		fmt.Println("  cancelled.")
+	default:
+		fmt.Println("  cancelled.")
+	}
+}
+
+func changePrimaryPlatform(proj projectConfig) {
+	all := []string{"github", "gitlab", "gitea", "forgejo"}
+	fmt.Println()
+	fmt.Println("  select new primary platform:")
+	fmt.Println()
+	for i, p := range all {
+		fmt.Printf("  %d  %s\n", i+1, p)
+	}
+	fmt.Println()
+	fmt.Printf("  [1-%d] pick, [q] quit › ", len(all))
+
+	for {
+		input := strings.TrimSpace(readLine())
+		if input == "q" || input == "" {
+			fmt.Println("  cancelled.")
+			return
+		}
+		for i, newPrimary := range all {
+			if input == fmt.Sprintf("%d", i+1) {
+				cfg := loadConfig()
+				if tokenForPlatform(cfg, newPrimary) == "" {
+					fmt.Println()
+					fmt.Printf("  %s %s is not configured — no token found.\n\n", colorYellow("⚠"), newPrimary)
+					fmt.Printf("  configure %s now? [Y/n] › ", newPrimary)
+					ans := strings.ToLower(strings.TrimSpace(readLine()))
+					if ans == "n" || ans == "no" {
+						fmt.Println("  cancelled.")
+						return
+					}
+					runSetup()
+					cfg = loadConfig()
+					if tokenForPlatform(cfg, newPrimary) == "" {
+						fmt.Printf("  %s no token saved for %s — cancelled.\n\n", colorRed("✗"), newPrimary)
+						return
+					}
+				}
+				oldPrimary := proj.effectivePrimary()
+				proj.primary = newPrimary
+				proj.platform = newPrimary
+				if oldPrimary != "" && oldPrimary != newPrimary {
+					alreadyMirror := false
+					for _, m := range proj.mirrors {
+						if m == oldPrimary {
+							alreadyMirror = true
+							break
+						}
+					}
+					if !alreadyMirror {
+						proj.mirrors = append(proj.mirrors, oldPrimary)
+					}
+				}
+				var filtered []string
+				for _, m := range proj.mirrors {
+					if m != newPrimary {
+						filtered = append(filtered, m)
+					}
+				}
+				proj.mirrors = filtered
+				if err := saveProjectConfig(proj); err != nil {
+					fatal("could not update .commitdog: %v", err)
+				}
+				newRemote := platformRemoteName(newPrimary)
+				newURL := ""
+
+				if newRemote != "origin" && remoteExists(newRemote) {
+					cmd := exec.Command("git", "remote", "get-url", newRemote)
+					var out strings.Builder
+					cmd.Stdout = &out
+					if err := cmd.Run(); err == nil {
+						newURL = strings.TrimSpace(out.String())
+					}
+				}
+
+				if newURL == "" {
+					_, repoName := getRepoOwnerAndName()
+					if repoName == "" {
+						if cwd, err := os.Getwd(); err == nil {
+							if idx := strings.LastIndex(cwd, "/"); idx >= 0 {
+								repoName = cwd[idx+1:]
+							}
+						}
+					}
+					if repoName != "" {
+						newURL, _ = buildOriginURL(newPrimary, repoName, cfg)
+						if newURL == "" {
+							newURL, _ = fetchRepoCloneURL(newPrimary, repoName, cfg)
+						}
+						if newURL == "" {
+							fmt.Printf("  %s repo not found on %s — you may need to create it first\n", colorYellow("⚠"), newPrimary)
+							fmt.Printf("  1  create repo on %s now\n", newPrimary)
+							fmt.Println("  2  continue anyway")
+							fmt.Println()
+							fmt.Printf("  [1/2] pick › ")
+							if strings.TrimSpace(readLine()) == "1" {
+								fmt.Println()
+								runInit()
+								return
+							}
+						}
+					}
+				}
+
+				if newURL != "" {
+					exec.Command("git", "remote", "set-url", "origin", newURL).Run()
+					fmt.Printf("  %s origin → %s\n", colorGreen("✓"), newURL)
+				}
+				fmt.Printf("  %s primary platform changed to %s\n\n", colorGreen("✓"), newPrimary)
+				return
+			}
+		}
+		fmt.Printf("  1-%d or q › ", len(all))
+	}
+}
+
+func addMirrorPlatform(proj projectConfig, c config) {
+	primary := proj.effectivePrimary()
+	all := []string{"github", "gitlab", "gitea", "forgejo"}
+
+	var available []string
+	for _, p := range all {
+		if p == primary {
+			continue
+		}
+		already := false
+		for _, m := range proj.mirrors {
+			if m == p {
+				already = true
+				break
+			}
+		}
+		if !already {
+			available = append(available, p)
+		}
+	}
+
+	if len(available) == 0 {
+		fmt.Println("  all platforms are already configured.")
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("  add which platform as mirror?")
+	fmt.Println()
+	for i, p := range available {
+		fmt.Printf("  %d  %s\n", i+1, p)
+	}
+	fmt.Println()
+	fmt.Printf("  [1-%d] pick, [q] quit › ", len(available))
+
+	var mirrorPlatform string
+	for {
+		input := strings.TrimSpace(readLine())
+		if input == "q" || input == "" {
+			fmt.Println("  cancelled.")
+			return
+		}
+		for i, p := range available {
+			if input == fmt.Sprintf("%d", i+1) {
+				mirrorPlatform = p
+				break
+			}
+		}
+		if mirrorPlatform != "" {
+			break
+		}
+		fmt.Printf("  1-%d or q › ", len(available))
+	}
+
+	token := tokenForPlatform(c, mirrorPlatform)
+	if token == "" {
+		fatal("no token for %s. run 'commitdog setup' first.", mirrorPlatform)
+	}
+
+	fmt.Printf("  connecting to %s...", mirrorPlatform)
+	username, err := platformUsername(c, mirrorPlatform)
+	if err != nil {
+		fmt.Println()
+		fatal("could not connect to %s: %v", mirrorPlatform, err)
+	}
+	fmt.Printf("\n  ✓ connected as %s\n\n", username)
+
+	owner := username
+	orgs, _ := platformOrgs(c, mirrorPlatform)
+	if len(orgs) > 0 {
+		fmt.Println("  where to create the repo?")
+		fmt.Println()
+		fmt.Printf("  1  %s (personal)\n", username)
+		for i, org := range orgs {
+			fmt.Printf("  %d  %s\n", i+2, org)
+		}
+		fmt.Println()
+		fmt.Printf("  [1-%d] pick › ", len(orgs)+1)
+		for {
+			inp := strings.TrimSpace(readLine())
+			if inp == "1" || inp == "" {
+				break
+			}
+			picked := false
+			for i, org := range orgs {
+				if inp == fmt.Sprintf("%d", i+2) {
+					owner = org
+					picked = true
+					break
+				}
+			}
+			if picked {
+				break
+			}
+			fmt.Printf("  1-%d › ", len(orgs)+1)
+		}
+		fmt.Println()
+	}
+
+	_, currentRepo := getRepoOwnerAndName()
+	fmt.Printf("  repo name [%s] › ", currentRepo)
+	input := sanitizeInput(readLine())
+	if input != "" {
+		currentRepo = input
+	}
+
+	fmt.Printf("  private or public? [P/u] › ")
+	private := true
+	for {
+		inp := strings.ToLower(sanitizeInput(readLine()))
+		if inp == "" || inp == "p" {
+			private = true
+			break
+		}
+		if inp == "u" {
+			private = false
+			break
+		}
+		fmt.Printf("  P or u › ")
+	}
+
+	fmt.Printf("\n  creating repo on %s...", mirrorPlatform)
+	repo, err := platformCreateRepo(c, mirrorPlatform, owner, username, currentRepo, private)
+	var remoteURL string
+	if err != nil {
+		fmt.Println()
+		errMsg := strings.ToLower(err.Error())
+		if strings.Contains(errMsg, "already exists") || strings.Contains(errMsg, "exists") || strings.Contains(errMsg, "repository creation failed") || strings.Contains(errMsg, "name already") {
+			fmt.Printf("  repo '%s' already exists on %s.\n\n", currentRepo, mirrorPlatform)
+			fmt.Println("  1  use existing repo as mirror")
+			fmt.Println("  2  choose a different name")
+			fmt.Println("  3  cancel")
+			fmt.Println()
+			fmt.Printf("  [1/2/3] pick › ")
+			switch strings.TrimSpace(readLine()) {
+			case "1":
+				fmt.Printf("  fetching repo details from %s...", mirrorPlatform)
+				fetched, ferr := platformCreateRepo(c, mirrorPlatform, owner, username, currentRepo, private)
+				if ferr == nil && fetched.HTMLURL != "" {
+					fmt.Println()
+					fmt.Printf("  found: %s\n", fetched.HTMLURL)
+					fmt.Printf("  use this repo? [Y/n] › ")
+					if ans := strings.ToLower(strings.TrimSpace(readLine())); ans != "n" && ans != "no" {
+						remoteURL = strings.TrimSuffix(fetched.HTMLURL, ".git") + ".git"
+					} else {
+						remoteURL = buildMirrorURL(c, mirrorPlatform, owner, currentRepo)
+					}
+				} else {
+					fmt.Println()
+					remoteURL = buildMirrorURL(c, mirrorPlatform, owner, currentRepo)
+				}
+				fmt.Printf("  using %s\n\n", remoteURL)
+			case "2":
+				fmt.Printf("  new repo name › ")
+				newName := sanitizeInput(readLine())
+				if newName == "" || !isSafeRepoName(newName) {
+					fmt.Println("  invalid name.")
+					return
+				}
+				currentRepo = newName
+				fmt.Printf("  creating repo...")
+				repo, err = platformCreateRepo(c, mirrorPlatform, owner, username, currentRepo, private)
+				if err != nil {
+					fmt.Println()
+					fatal("failed to create repo: %v", err)
+				}
+				fmt.Printf("\n  ✓ repo created: %s\n\n", repo.HTMLURL)
+				remoteURL = strings.TrimSuffix(repo.HTMLURL, ".git") + ".git"
+			default:
+				fmt.Println("  cancelled.")
+				return
+			}
+		} else {
+			fatal("failed to create repo: %v", err)
+		}
+	} else {
+		fmt.Printf("\n  ✓ repo created: %s\n\n", repo.HTMLURL)
+		remoteURL = strings.TrimSuffix(repo.HTMLURL, ".git") + ".git"
+	}
+
+	remoteName := platformRemoteName(mirrorPlatform)
+	if remoteExists(remoteName) {
+		cmd := exec.Command("git", "remote", "set-url", remoteName, remoteURL)
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("  warning: could not update remote URL: %v\n", err)
+		} else {
+			fmt.Printf("  %s remote '%s' URL updated\n", colorGreen("✓"), remoteName)
+		}
+	} else if err := gitAddRemote(remoteName, remoteURL); err != nil {
+		fmt.Printf("  could not add remote '%s': %v\n", remoteName, err)
+		fmt.Printf("  enter remote URL manually (or leave empty to cancel) › ")
+		manualURL := strings.TrimSpace(readLine())
+		if manualURL == "" {
+			fmt.Println("  cancelled.")
+			return
+		}
+		if err2 := gitAddRemote(remoteName, manualURL); err2 != nil {
+			fmt.Printf("  %s could not add remote: %v\n", colorRed("✗"), err2)
+			return
+		}
+		remoteURL = manualURL
+		fmt.Printf("  %s remote '%s' added\n", colorGreen("✓"), remoteName)
+	} else {
+		fmt.Printf("  %s remote '%s' added\n", colorGreen("✓"), remoteName)
+	}
+
+	proj.mirrors = append(proj.mirrors, mirrorPlatform)
+	if proj.primary == "" {
+		proj.primary = primary
+	}
+	if err := saveProjectConfig(proj); err != nil {
+		fmt.Printf("  %s could not update .commitdog: %v\n", colorRed("✗"), err)
+	} else {
+		fmt.Printf("  %s .commitdog updated\n", colorGreen("✓"))
+	}
+
+	branch := getCurrentBranch()
+	authHeader := authHeaderForPlatformName(mirrorPlatform)
+	fmt.Printf("  pushing to %s...", mirrorPlatform)
+	if err := runPushUpstreamWithAuth(remoteName, branch, authHeader); err != nil {
+		fmt.Printf("\n  %s push failed: %v\n", colorRed("✗"), err)
+		platformFlags := map[string]string{"github": "gh", "gitlab": "gl", "gitea": "gt", "forgejo": "fg"}
+		fmt.Printf("  mirror registered — run 'commitdog -%s' to retry\n\n", platformFlags[mirrorPlatform])
+	} else {
+		fmt.Printf("\n  %s pushed\n\n", colorGreen("✓"))
+	}
+}
+
+func buildMirrorURL(c config, platform, username, repo string) string {
+	switch platform {
+	case "gitlab":
+		host := gitlabHost(c)
+		return strings.TrimRight(host, "/") + "/" + username + "/" + repo + ".git"
+	case "gitea":
+		return strings.TrimRight(c.Gitea.Host, "/") + "/" + username + "/" + repo + ".git"
+	case "forgejo":
+		return strings.TrimRight(c.Forgejo.Host, "/") + "/" + username + "/" + repo + ".git"
+	default:
+		return "https://github.com/" + username + "/" + repo + ".git"
+	}
+}
+
+func removeMirrorPlatform(proj projectConfig) {
+	fmt.Println()
+	fmt.Println("  remove which mirror?")
+	fmt.Println()
+	for i, m := range proj.mirrors {
+		fmt.Printf("  %d  %s\n", i+1, m)
+	}
+	fmt.Println()
+	fmt.Printf("  [1-%d] pick, [q] quit › ", len(proj.mirrors))
+
+	var target string
+	for {
+		input := strings.TrimSpace(readLine())
+		if input == "q" || input == "" {
+			fmt.Println("  cancelled.")
+			return
+		}
+		for i, m := range proj.mirrors {
+			if input == fmt.Sprintf("%d", i+1) {
+				target = m
+				break
+			}
+		}
+		if target != "" {
+			break
+		}
+		fmt.Printf("  1-%d or q › ", len(proj.mirrors))
+	}
+
+	fmt.Println()
+	fmt.Printf("  removing %s as a mirror\n\n", target)
+	fmt.Println("  this will:")
+	fmt.Println("  · remove the git remote from this repo")
+	fmt.Println("  · remove " + target + " from .commitdog")
+	fmt.Println("  · leave the repo on " + target + " untouched")
+	fmt.Println()
+	fmt.Printf("  type 'y' to confirm or 'n' to cancel › ")
+
+	for {
+		input := strings.ToLower(strings.TrimSpace(readLine()))
+		if input == "y" || input == "yes" {
+			break
+		}
+		if input == "n" || input == "no" {
+			fmt.Println("  cancelled.")
+			return
+		}
+		fmt.Printf("  type 'y' or 'n' › ")
+	}
+
+	fmt.Println()
+
+	remoteName := platformRemoteName(target)
+	repoURL := getRemoteURL(remoteName)
+
+	if remoteExists(remoteName) {
+		if err := exec.Command("git", "remote", "remove", remoteName).Run(); err != nil {
+			fmt.Printf("  %s could not remove remote '%s'\n", colorRed("✗"), remoteName)
+		} else {
+			fmt.Printf("  %s remote '%s' removed\n", colorGreen("✓"), remoteName)
+		}
+	}
+
+	var updated []string
+	for _, m := range proj.mirrors {
+		if m != target {
+			updated = append(updated, m)
+		}
+	}
+	proj.mirrors = updated
+	if err := saveProjectConfig(proj); err != nil {
+		fmt.Printf("  %s could not update .commitdog: %v\n", colorRed("✗"), err)
+		return
+	}
+	fmt.Printf("  %s .commitdog updated\n\n", colorGreen("✓"))
+
+	if repoURL != "" {
+		cleanURL := strings.TrimSuffix(repoURL, ".git")
+		fmt.Printf("  to delete the repo on %s:\n", target)
+		fmt.Printf("  → %s/settings\n\n", cleanURL)
+	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 )
 
 const version = "0.3.0"
@@ -27,6 +28,9 @@ func main() {
 			os.Exit(0)
 		case "--update", "update":
 			runUpdate()
+			os.Exit(0)
+		case "--uninstall":
+			runUninstall()
 			os.Exit(0)
 		case "branch":
 			runBranch()
@@ -61,8 +65,21 @@ func main() {
 		case "updateaur":
 			runUpdateAUR()
 			os.Exit(0)
+		case "-gh":
+			runCommitFlow(os.Args[2:], "github")
+			os.Exit(0)
+		case "-gl":
+			runCommitFlow(os.Args[2:], "gitlab")
+			os.Exit(0)
+		case "-gt":
+			runCommitFlow(os.Args[2:], "gitea")
+			os.Exit(0)
+		case "-fg":
+			runCommitFlow(os.Args[2:], "forgejo")
+			os.Exit(0)
 		default:
-			runCommitFlow(os.Args[1:])
+			platform, files := parsePlatformFlag(os.Args[1:])
+			runCommitFlow(files, platform)
 			os.Exit(0)
 		}
 	}
@@ -73,10 +90,30 @@ func main() {
 		fatal("not a git repository. run 'commitdog init' to create one.")
 	}
 
-	runCommitFlow(nil)
+	runCommitFlow(nil, "")
 }
 
-func runCommitFlow(files []string) {
+func parsePlatformFlag(args []string) (string, []string) {
+	var platform string
+	var rest []string
+	for _, arg := range args {
+		switch arg {
+		case "-gh":
+			platform = "github"
+		case "-gl":
+			platform = "gitlab"
+		case "-gt":
+			platform = "gitea"
+		case "-fg":
+			platform = "forgejo"
+		default:
+			rest = append(rest, arg)
+		}
+	}
+	return platform, rest
+}
+
+func runCommitFlow(files []string, platform string) {
 	if err := verifyGitRepo(); err != nil {
 		fatal("not a git repository. run 'commitdog init' to create one.")
 	}
@@ -114,6 +151,36 @@ func runCommitFlow(files []string) {
 
 	if diff == "" && len(stagedNew) == 0 {
 		warnEmptyDirs()
+		proj := loadProjectConfig()
+		targetPlatform := platform
+		if targetPlatform == "" {
+			targetPlatform = proj.effectivePrimary()
+		}
+		if targetPlatform == "" {
+			targetPlatform = "github"
+		}
+		remote := remoteForPlatform(targetPlatform)
+		branch := getCurrentBranch()
+		if hasUnpushedCommits(remote, branch) {
+			fmt.Printf("  nothing to commit — pushing unpushed commits to %s...\n", targetPlatform)
+			askPush(platform)
+			return
+		}
+		proj2 := loadProjectConfig()
+		platformFlags := map[string]string{
+			"github":  "gh",
+			"gitlab":  "gl",
+			"gitea":   "gt",
+			"forgejo": "fg",
+		}
+		for _, m := range proj2.mirrors {
+			mr := remoteForPlatform(m)
+			if hasUnpushedCommits(mr, branch) {
+				fmt.Printf("  up to date with %s\n", targetPlatform)
+				fmt.Printf("  %s has unpushed commits — run 'commitdog -%s' to push\n\n", m, platformFlags[m])
+				return
+			}
+		}
 		fatal("nothing to commit — no changes found.")
 	}
 
@@ -139,7 +206,10 @@ func runCommitFlow(files []string) {
 
 	chosen := pickSuggestion(suggestions)
 	if chosen == "" {
+		exec.Command("git", "restore", "--staged", ".").Run()
+		fmt.Println()
 		fmt.Println("  aborted.")
+		fmt.Printf("  %s staged changes removed\n\n", colorYellow("⚠"))
 		os.Exit(0)
 	}
 
@@ -149,7 +219,7 @@ func runCommitFlow(files []string) {
 
 	fmt.Printf("\n  ✓ committed: %s\n", chosen)
 
-	askPush()
+	askPush(platform)
 }
 
 func printHelp() {
@@ -158,6 +228,8 @@ func printHelp() {
 usage:
   commitdog                 stage all changes and generate commit message
   commitdog <file>          stage specific file and generate commit message
+  commitdog -gl/-gt/-fg     commit and push to gitlab / gitea / forgejo
+  commitdog --uninstall     remove commitdog from this device completely
 
   commitdog init            create a new GitHub repo and first push
   commitdog setup           configure email and GitHub token
@@ -189,8 +261,8 @@ usage:
   commitdog release config    configure build targets
 
   commitdog --update        update to latest version
-  commitdog --version       show version and logo
-  commitdog --help          show this help
+  commitdog version         show version and logo
+  commitdog help            show this help
 
 workflow:
   first time:

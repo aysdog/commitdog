@@ -41,19 +41,51 @@ func runPR() {
 	}
 
 	cfg := loadConfig()
-	if cfg.GitHub.Token == "" {
-		fatal("no GitHub token found. run 'commitdog setup' first.")
-	}
-
+	proj := loadProjectConfig()
+	platform := proj.effectivePrimary()
 	branch := getCurrentBranch()
 	baseBranch := getBaseBranch()
+	onBase := branch == "main" || branch == "master" || branch == baseBranch
 
-	if branch == "main" || branch == "master" || branch == baseBranch {
-		runPRList(cfg.GitHub.Token)
-		return
+	switch platform {
+	case "gitlab":
+		if cfg.GitLab.Token == "" {
+			fatal("no GitLab token found. run 'commitdog setup' first.")
+		}
+		host := gitlabHost(cfg)
+		if onBase {
+			runPRListGitLab(cfg.GitLab.Token, host)
+		} else {
+			runPRCreateGitLab(cfg.GitLab.Token, host, branch, baseBranch)
+		}
+	case "gitea":
+		if cfg.Gitea.Token == "" {
+			fatal("no Gitea token found. run 'commitdog setup' first.")
+		}
+		if onBase {
+			runPRListGitea(cfg.Gitea.Token, cfg.Gitea.Host)
+		} else {
+			runPRCreateGitea(cfg.Gitea.Token, cfg.Gitea.Host, branch, baseBranch)
+		}
+	case "forgejo":
+		if cfg.Forgejo.Token == "" {
+			fatal("no Forgejo token found. run 'commitdog setup' first.")
+		}
+		if onBase {
+			runPRListForgejo(cfg.Forgejo.Token, cfg.Forgejo.Host)
+		} else {
+			runPRCreateForgejo(cfg.Forgejo.Token, cfg.Forgejo.Host, branch, baseBranch)
+		}
+	default:
+		if cfg.GitHub.Token == "" {
+			fatal("no GitHub token found. run 'commitdog setup' first.")
+		}
+		if onBase {
+			runPRList(cfg.GitHub.Token)
+		} else {
+			runPRCreate(cfg.GitHub.Token, branch, baseBranch)
+		}
 	}
-
-	runPRCreate(cfg.GitHub.Token, branch, baseBranch)
 }
 
 func runPRCreate(token, branch, base string) {
@@ -76,29 +108,13 @@ func runPRCreate(token, branch, base string) {
 		return
 	}
 
-	defaultTitle := getLastCommitSubject()
-
-	fmt.Println()
-	fmt.Printf("  creating PR: \033[36m%s\033[0m → \033[36m%s\033[0m\n\n", branch, base)
-	fmt.Printf("  title › ")
-
-	titleInput := readLine()
-	if titleInput == "" {
-		titleInput = defaultTitle
+	titleInput, desc, ok := gatherPRContent(branch, base)
+	if !ok {
+		fmt.Println("  aborted.")
+		return
 	}
 	if titleInput == "" {
 		fmt.Println("  aborted: title cannot be empty.")
-		return
-	}
-
-	fmt.Printf("  description (optional) › ")
-	desc := readLine()
-
-	fmt.Println()
-	fmt.Printf("  [enter] confirm  [q] cancel › ")
-	confirm := readLine()
-	if confirm == "q" {
-		fmt.Println("  aborted.")
 		return
 	}
 
@@ -125,7 +141,7 @@ func runPRCreate(token, branch, base string) {
 	}
 
 	fmt.Println()
-	fmt.Printf("  \033[32m✓\033[0m PR #%d created\n", pr.Number)
+	fmt.Printf("  %s PR #%d created\n", colorGreen("✓"), pr.Number)
 	fmt.Printf("  %s\n\n", pr.HTMLURL)
 	fmt.Printf("  open in browser? [Y/n] › ")
 
@@ -141,6 +157,111 @@ func isUpKey(b []byte, n int) bool {
 
 func isDownKey(b []byte, n int) bool {
 	return b[0] == 'j' || (n == 3 && b[0] == 27 && b[1] == 91 && b[2] == 66)
+}
+
+func showMergeDialog(pr prEntry) (string, bool) {
+	fmt.Printf("  merge PR #%d — %s\n\n", pr.Number, pr.Title)
+	fmt.Println("  1  merge commit")
+	fmt.Println("  2  squash merge")
+	fmt.Println("  3  rebase merge")
+	fmt.Println()
+	fmt.Printf("  [1/2/3] pick › ")
+
+	methods := map[string]string{"1": "merge", "2": "squash", "3": "rebase"}
+	for {
+		input := strings.TrimSpace(readLine())
+		if input == "q" {
+			return "", false
+		}
+		if m, ok := methods[input]; ok {
+			return m, true
+		}
+		fmt.Printf("  1, 2, or 3 › ")
+	}
+}
+
+func renderPRList(owner, repo string, prs []prEntry, onMerge func(pr prEntry)) {
+	selected := 0
+	termH := terminalHeight()
+	visibleH := termH - 8
+	if visibleH < 3 {
+		visibleH = 3
+	}
+	offset := 0
+
+	enableRawMode()
+	defer disableRawMode()
+
+	for {
+		clearScreen()
+
+		fmt.Printf("  %s — %s/%s\n\n", colorBold("open PRs"), owner, repo)
+
+		end := offset + visibleH
+		if end > len(prs) {
+			end = len(prs)
+		}
+
+		for i := offset; i < end; i++ {
+			pr := prs[i]
+			cursor := "  "
+			if i == selected {
+				cursor = colorYellow("›") + " "
+			}
+			title := pr.Title
+			if len(title) > 40 {
+				title = title[:37] + "..."
+			}
+			fmt.Printf("%s#%-4d %s → %s  %-42s %s\n",
+				cursor, pr.Number,
+				colorCyan(fmt.Sprintf("%-14s", pr.Head.Ref)),
+				colorCyan(fmt.Sprintf("%-10s", pr.Base.Ref)),
+				title,
+				colorMuted("@"+pr.User.Login))
+		}
+
+		fmt.Println()
+		fmt.Println(colorMuted("  [j/k/↑/↓] navigate  [d] view diff  [m] merge  [q] quit"))
+
+		b := make([]byte, 3)
+		n, _ := os.Stdin.Read(b)
+		if n == 0 {
+			continue
+		}
+
+		switch {
+		case b[0] == 'q':
+			clearScreen()
+			return
+		case b[0] == 'm':
+			disableRawMode()
+			clearScreen()
+			onMerge(prs[selected])
+			return
+		case b[0] == 'd':
+			disableRawMode()
+			clearScreen()
+			files, _ := getDiffFiles(prs[selected].Base.Ref, prs[selected].Head.Ref)
+			if len(files) > 0 {
+				runDiffViewerReview(files, prs[selected].Base.Ref, prs[selected].Head.Ref)
+			}
+			enableRawMode()
+		case isUpKey(b, n):
+			if selected > 0 {
+				selected--
+				if selected < offset {
+					offset--
+				}
+			}
+		case isDownKey(b, n):
+			if selected < len(prs)-1 {
+				selected++
+				if selected >= offset+visibleH {
+					offset++
+				}
+			}
+		}
+	}
 }
 
 func runPRList(token string) {
@@ -170,83 +291,9 @@ func runPRList(token string) {
 		return
 	}
 
-	selected := 0
-	termH := terminalHeight()
-	visibleH := termH - 8
-	if visibleH < 3 {
-		visibleH = 3
-	}
-	offset := 0
-
-	enableRawMode()
-	defer disableRawMode()
-
-	for {
-		clearScreen()
-
-		fmt.Printf("  \033[1mopen PRs\033[0m — %s/%s\n\n", owner, repo)
-
-		end := offset + visibleH
-		if end > len(prs) {
-			end = len(prs)
-		}
-
-		for i := offset; i < end; i++ {
-			pr := prs[i]
-			cursor := "  "
-			if i == selected {
-				cursor = "\033[33m›\033[0m "
-			}
-			title := pr.Title
-			if len(title) > 40 {
-				title = title[:37] + "..."
-			}
-			fmt.Printf("%s#%-4d \033[36m%-14s\033[0m → \033[36m%-10s\033[0m  %-42s \033[90m@%s\033[0m\n",
-				cursor, pr.Number, pr.Head.Ref, pr.Base.Ref, title, pr.User.Login)
-		}
-
-		fmt.Println()
-		fmt.Println("  \033[90m[j/k/↑/↓] navigate  [d] view diff  [m] merge  [q] quit\033[0m")
-
-		b := make([]byte, 3)
-		n, _ := os.Stdin.Read(b)
-		if n == 0 {
-			continue
-		}
-
-		switch {
-		case b[0] == 'q':
-			clearScreen()
-			return
-		case b[0] == 'm':
-			disableRawMode()
-			clearScreen()
-			runPRMerge(token, owner, repo, prs[selected])
-			return
-		case b[0] == 'd':
-			disableRawMode()
-			clearScreen()
-			files, _ := getDiffFiles(prs[selected].Base.Ref, prs[selected].Head.Ref)
-			if len(files) > 0 {
-				runDiffViewerReview(files, prs[selected].Base.Ref, prs[selected].Head.Ref)
-			}
-			enableRawMode()
-		case isUpKey(b, n):
-			if selected > 0 {
-				selected--
-				if selected < offset {
-					offset--
-				}
-			}
-		case isDownKey(b, n):
-			if selected < len(prs)-1 {
-				selected++
-				if selected >= offset+visibleH {
-					offset++
-				}
-			}
-		}
-	}
+	renderPRList(owner, repo, prs, func(pr prEntry) {
+		runPRMerge(token, owner, repo, pr)
+	})
 }
 
 func runDiffViewerReview(files []diffFile, base, head string) {
@@ -271,7 +318,10 @@ func runDiffViewerReview(files []diffFile, base, head string) {
 			totalDels += f.dels
 		}
 
-		fmt.Printf("  \033[1m%d files changed\033[0m  \033[32m+%d\033[0m  \033[31m-%d\033[0m\n\n", len(files), totalAdds, totalDels)
+		fmt.Printf("  %s  %s  %s\n\n",
+			colorBold(fmt.Sprintf("%d files changed", len(files))),
+			colorGreen(fmt.Sprintf("+%d", totalAdds)),
+			colorRed(fmt.Sprintf("-%d", totalDels)))
 
 		end := offset + visibleH
 		if end > len(files) {
@@ -282,19 +332,23 @@ func runDiffViewerReview(files []diffFile, base, head string) {
 			f := files[i]
 			cursor := "  "
 			if i == selected {
-				cursor = "\033[33m›\033[0m "
+				cursor = colorYellow("›") + " "
 			}
 			name := f.name
 			if len(name) > 35 {
 				name = "..." + name[len(name)-32:]
 			}
 			bar := renderBar(f.adds, f.dels, 16)
-			fmt.Printf("%s\033[36m%-36s\033[0m \033[32m+%-3d\033[0m \033[31m-%-3d\033[0m  %s\n",
-				cursor, name, f.adds, f.dels, bar)
+			fmt.Printf("%s%s %s %s  %s\n",
+				cursor,
+				colorCyan(fmt.Sprintf("%-36s", name)),
+				colorGreen(fmt.Sprintf("+%-3d", f.adds)),
+				colorRed(fmt.Sprintf("-%-3d", f.dels)),
+				bar)
 		}
 
 		fmt.Println()
-		fmt.Println("  \033[90m[j/k/↑/↓] navigate  [d] view diff  [q] back\033[0m")
+		fmt.Println(colorMuted("  [j/k/↑/↓] navigate  [d] view diff  [q] back"))
 
 		b := make([]byte, 3)
 		n, _ := os.Stdin.Read(b)
@@ -330,31 +384,10 @@ func runDiffViewerReview(files []diffFile, base, head string) {
 }
 
 func runPRMerge(token, owner, repo string, pr prEntry) {
-	fmt.Printf("  merge PR #%d — %s\n\n", pr.Number, pr.Title)
-	fmt.Println("  1  merge commit")
-	fmt.Println("  2  squash merge")
-	fmt.Println("  3  rebase merge")
-	fmt.Println()
-	fmt.Printf("  [1/2/3] pick › ")
-
-	methods := map[string]string{
-		"1": "merge",
-		"2": "squash",
-		"3": "rebase",
-	}
-
-	var method string
-	for {
-		input := strings.TrimSpace(readLine())
-		if input == "q" {
-			fmt.Println("  aborted.")
-			return
-		}
-		if m, ok := methods[input]; ok {
-			method = m
-			break
-		}
-		fmt.Printf("  1, 2, or 3 › ")
+	method, ok := showMergeDialog(pr)
+	if !ok {
+		fmt.Println("  aborted.")
+		return
 	}
 
 	fmt.Println()
@@ -371,7 +404,7 @@ func runPRMerge(token, owner, repo string, pr prEntry) {
 	}
 
 	fmt.Println()
-	fmt.Printf("  \033[32m✓\033[0m merged PR #%d into %s\n\n", pr.Number, pr.Base.Ref)
+	fmt.Printf("  %s merged PR #%d into %s\n\n", colorGreen("✓"), pr.Number, pr.Base.Ref)
 	fmt.Printf("  delete %s branch? [Y/n] › ", pr.Head.Ref)
 
 	if ans := readLine(); ans != "n" && ans != "no" {
@@ -380,13 +413,13 @@ func runPRMerge(token, owner, repo string, pr prEntry) {
 			token, nil,
 		)
 		exec.Command("git", "branch", "-d", pr.Head.Ref).Run()
-		fmt.Printf("  \033[32m✓\033[0m deleted %s\n", pr.Head.Ref)
+		fmt.Printf("  %s deleted %s\n", colorGreen("✓"), pr.Head.Ref)
 	}
 
 	fmt.Printf("  pulling %s...\n", pr.Base.Ref)
 	exec.Command("git", "checkout", pr.Base.Ref).Run()
 	exec.Command("git", "pull", "--rebase").Run()
-	fmt.Printf("  \033[32m✓\033[0m up to date\n\n")
+	fmt.Printf("  %s up to date\n\n", colorGreen("✓"))
 }
 
 func getRepoOwnerAndName() (string, string) {
@@ -454,4 +487,332 @@ func openBrowser(url string) {
 			return
 		}
 	}
+}
+
+func runPRCreateGitLab(token, host, branch, base string) {
+	owner, repo := getRepoOwnerAndName()
+	if owner == "" || repo == "" {
+		fatal("could not detect GitLab repo.")
+	}
+
+	projectID, err := getGitLabProjectID(token, host, owner, repo)
+	if err != nil {
+		fatal("could not get GitLab project: %v", err)
+	}
+
+	files, err := getDiffFiles(base, branch)
+	if err != nil || len(files) == 0 {
+		fmt.Println()
+		fmt.Println("  no changes between " + branch + " and " + base)
+		fmt.Println()
+		return
+	}
+
+	if !runDiffViewer(files, base, branch) {
+		fmt.Println("  aborted.")
+		return
+	}
+
+	title, desc, ok := gatherPRContent(branch, base)
+	if !ok {
+		fmt.Println("  aborted.")
+		return
+	}
+	if title == "" {
+		fmt.Println("  aborted: title cannot be empty.")
+		return
+	}
+
+	fmt.Println()
+	fmt.Printf("  creating MR...")
+
+	mr, err := createGitLabMR(token, host, projectID, title, desc, branch, base)
+	if err != nil {
+		fmt.Println()
+		fatal("could not create MR: %v", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("  %s MR !%d created\n", colorGreen("✓"), mr.Number)
+	fmt.Printf("  %s\n\n", mr.HTMLURL)
+	fmt.Printf("  open in browser? [Y/n] › ")
+
+	if ans := readLine(); ans != "n" && ans != "no" {
+		openBrowser(mr.HTMLURL)
+	}
+	fmt.Println()
+}
+
+func runPRListGitLab(token, host string) {
+	owner, repo := getRepoOwnerAndName()
+	if owner == "" || repo == "" {
+		fatal("could not detect GitLab repo.")
+	}
+
+	projectID, err := getGitLabProjectID(token, host, owner, repo)
+	if err != nil {
+		fatal("could not get GitLab project: %v", err)
+	}
+
+	fmt.Printf("  fetching MRs...")
+	prs, err := listGitLabMRs(token, host, projectID)
+	if err != nil {
+		fmt.Println()
+		fatal("could not fetch MRs: %v", err)
+	}
+
+	if len(prs) == 0 {
+		fmt.Println()
+		fmt.Println()
+		fmt.Println("  no open MRs.")
+		fmt.Println()
+		return
+	}
+
+	renderPRList(owner, repo, prs, func(pr prEntry) {
+		runPRMergeGitLab(token, host, projectID, pr)
+	})
+}
+
+func runPRMergeGitLab(token, host, projectID string, pr prEntry) {
+	method, ok := showMergeDialog(pr)
+	if !ok {
+		fmt.Println("  aborted.")
+		return
+	}
+
+	fmt.Println()
+	fmt.Printf("  merging...")
+
+	if err := mergeGitLabMR(token, host, projectID, pr.Number, method); err != nil {
+		fmt.Println()
+		fatal("merge failed: %v", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("  %s merged MR !%d into %s\n\n", colorGreen("✓"), pr.Number, pr.Base.Ref)
+	fmt.Printf("  delete %s branch? [Y/n] › ", pr.Head.Ref)
+
+	if ans := readLine(); ans != "n" && ans != "no" {
+		deleteGitLabBranch(token, host, projectID, pr.Head.Ref)
+		exec.Command("git", "branch", "-d", pr.Head.Ref).Run()
+		fmt.Printf("  %s deleted %s\n", colorGreen("✓"), pr.Head.Ref)
+	}
+
+	fmt.Printf("  pulling %s...\n", pr.Base.Ref)
+	exec.Command("git", "checkout", pr.Base.Ref).Run()
+	exec.Command("git", "pull", "--rebase").Run()
+	fmt.Printf("  %s up to date\n\n", colorGreen("✓"))
+}
+
+func runPRCreateGitea(token, host, branch, base string) {
+	owner, repo := getRepoOwnerAndName()
+	if owner == "" || repo == "" {
+		fatal("could not detect Gitea repo.")
+	}
+
+	files, err := getDiffFiles(base, branch)
+	if err != nil || len(files) == 0 {
+		fmt.Println()
+		fmt.Println("  no changes between " + branch + " and " + base)
+		fmt.Println()
+		return
+	}
+
+	if !runDiffViewer(files, base, branch) {
+		fmt.Println("  aborted.")
+		return
+	}
+
+	title, desc, ok := gatherPRContent(branch, base)
+	if !ok {
+		fmt.Println("  aborted.")
+		return
+	}
+	if title == "" {
+		fmt.Println("  aborted: title cannot be empty.")
+		return
+	}
+
+	fmt.Println()
+	fmt.Printf("  creating PR...")
+
+	pr, err := createGiteaPR(token, host, owner, repo, title, desc, branch, base)
+	if err != nil {
+		fmt.Println()
+		fatal("could not create PR: %v", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("  %s PR #%d created\n", colorGreen("✓"), pr.Number)
+	fmt.Printf("  %s\n\n", pr.HTMLURL)
+	fmt.Printf("  open in browser? [Y/n] › ")
+
+	if ans := readLine(); ans != "n" && ans != "no" {
+		openBrowser(pr.HTMLURL)
+	}
+	fmt.Println()
+}
+
+func runPRListGitea(token, host string) {
+	owner, repo := getRepoOwnerAndName()
+	if owner == "" || repo == "" {
+		fatal("could not detect Gitea repo.")
+	}
+
+	fmt.Printf("  fetching PRs...")
+	prs, err := listGiteaPRs(token, host, owner, repo)
+	if err != nil {
+		fmt.Println()
+		fatal("could not fetch PRs: %v", err)
+	}
+
+	if len(prs) == 0 {
+		fmt.Println()
+		fmt.Println()
+		fmt.Println("  no open PRs.")
+		fmt.Println()
+		return
+	}
+
+	renderPRList(owner, repo, prs, func(pr prEntry) {
+		runPRMergeGitea(token, host, owner, repo, pr)
+	})
+}
+
+func runPRMergeGitea(token, host, owner, repo string, pr prEntry) {
+	method, ok := showMergeDialog(pr)
+	if !ok {
+		fmt.Println("  aborted.")
+		return
+	}
+
+	fmt.Println()
+	fmt.Printf("  merging...")
+
+	if err := mergeGiteaPR(token, host, owner, repo, pr.Number, method); err != nil {
+		fmt.Println()
+		fatal("merge failed: %v", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("  %s merged PR #%d into %s\n\n", colorGreen("✓"), pr.Number, pr.Base.Ref)
+	fmt.Printf("  delete %s branch? [Y/n] › ", pr.Head.Ref)
+
+	if ans := readLine(); ans != "n" && ans != "no" {
+		deleteGiteaBranch(token, host, owner, repo, pr.Head.Ref)
+		exec.Command("git", "branch", "-d", pr.Head.Ref).Run()
+		fmt.Printf("  %s deleted %s\n", colorGreen("✓"), pr.Head.Ref)
+	}
+
+	fmt.Printf("  pulling %s...\n", pr.Base.Ref)
+	exec.Command("git", "checkout", pr.Base.Ref).Run()
+	exec.Command("git", "pull", "--rebase").Run()
+	fmt.Printf("  %s up to date\n\n", colorGreen("✓"))
+}
+
+func runPRCreateForgejo(token, host, branch, base string) {
+	owner, repo := getRepoOwnerAndName()
+	if owner == "" || repo == "" {
+		fatal("could not detect Forgejo repo.")
+	}
+
+	files, err := getDiffFiles(base, branch)
+	if err != nil || len(files) == 0 {
+		fmt.Println()
+		fmt.Println("  no changes between " + branch + " and " + base)
+		fmt.Println()
+		return
+	}
+
+	if !runDiffViewer(files, base, branch) {
+		fmt.Println("  aborted.")
+		return
+	}
+
+	title, desc, ok := gatherPRContent(branch, base)
+	if !ok {
+		fmt.Println("  aborted.")
+		return
+	}
+	if title == "" {
+		fmt.Println("  aborted: title cannot be empty.")
+		return
+	}
+
+	fmt.Println()
+	fmt.Printf("  creating PR...")
+
+	pr, err := createForgejoPR(token, host, owner, repo, title, desc, branch, base)
+	if err != nil {
+		fmt.Println()
+		fatal("could not create PR: %v", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("  %s PR #%d created\n", colorGreen("✓"), pr.Number)
+	fmt.Printf("  %s\n\n", pr.HTMLURL)
+	fmt.Printf("  open in browser? [Y/n] › ")
+
+	if ans := readLine(); ans != "n" && ans != "no" {
+		openBrowser(pr.HTMLURL)
+	}
+	fmt.Println()
+}
+
+func runPRListForgejo(token, host string) {
+	owner, repo := getRepoOwnerAndName()
+	if owner == "" || repo == "" {
+		fatal("could not detect Forgejo repo.")
+	}
+
+	fmt.Printf("  fetching PRs...")
+	prs, err := listForgejoPRs(token, host, owner, repo)
+	if err != nil {
+		fmt.Println()
+		fatal("could not fetch PRs: %v", err)
+	}
+
+	if len(prs) == 0 {
+		fmt.Println()
+		fmt.Println()
+		fmt.Println("  no open PRs.")
+		fmt.Println()
+		return
+	}
+
+	renderPRList(owner, repo, prs, func(pr prEntry) {
+		runPRMergeForgejo(token, host, owner, repo, pr)
+	})
+}
+
+func runPRMergeForgejo(token, host, owner, repo string, pr prEntry) {
+	method, ok := showMergeDialog(pr)
+	if !ok {
+		fmt.Println("  aborted.")
+		return
+	}
+
+	fmt.Println()
+	fmt.Printf("  merging...")
+
+	if err := mergeForgejoPR(token, host, owner, repo, pr.Number, method); err != nil {
+		fmt.Println()
+		fatal("merge failed: %v", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("  %s merged PR #%d into %s\n\n", colorGreen("✓"), pr.Number, pr.Base.Ref)
+	fmt.Printf("  delete %s branch? [Y/n] › ", pr.Head.Ref)
+
+	if ans := readLine(); ans != "n" && ans != "no" {
+		deleteForgejoBranch(token, host, owner, repo, pr.Head.Ref)
+		exec.Command("git", "branch", "-d", pr.Head.Ref).Run()
+		fmt.Printf("  %s deleted %s\n", colorGreen("✓"), pr.Head.Ref)
+	}
+
+	fmt.Printf("  pulling %s...\n", pr.Base.Ref)
+	exec.Command("git", "checkout", pr.Base.Ref).Run()
+	exec.Command("git", "pull", "--rebase").Run()
+	fmt.Printf("  %s up to date\n\n", colorGreen("✓"))
 }
