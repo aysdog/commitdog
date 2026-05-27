@@ -489,6 +489,38 @@ func addMirrorPlatform(proj projectConfig, c config) {
 	}
 	fmt.Printf("\n  ✓ connected as %s\n\n", username)
 
+	owner := username
+	orgs, _ := platformOrgs(c, mirrorPlatform)
+	if len(orgs) > 0 {
+		fmt.Println("  where to create the repo?")
+		fmt.Println()
+		fmt.Printf("  1  %s (personal)\n", username)
+		for i, org := range orgs {
+			fmt.Printf("  %d  %s\n", i+2, org)
+		}
+		fmt.Println()
+		fmt.Printf("  [1-%d] pick › ", len(orgs)+1)
+		for {
+			inp := strings.TrimSpace(readLine())
+			if inp == "1" || inp == "" {
+				break
+			}
+			picked := false
+			for i, org := range orgs {
+				if inp == fmt.Sprintf("%d", i+2) {
+					owner = org
+					picked = true
+					break
+				}
+			}
+			if picked {
+				break
+			}
+			fmt.Printf("  1-%d › ", len(orgs)+1)
+		}
+		fmt.Println()
+	}
+
 	_, currentRepo := getRepoOwnerAndName()
 	fmt.Printf("  repo name [%s] › ", currentRepo)
 	input := sanitizeInput(readLine())
@@ -512,7 +544,7 @@ func addMirrorPlatform(proj projectConfig, c config) {
 	}
 
 	fmt.Printf("\n  creating repo on %s...", mirrorPlatform)
-	repo, err := platformCreateRepo(c, mirrorPlatform, username, username, currentRepo, private)
+	repo, err := platformCreateRepo(c, mirrorPlatform, owner, username, currentRepo, private)
 	var remoteURL string
 	if err != nil {
 		fmt.Println()
@@ -527,22 +559,19 @@ func addMirrorPlatform(proj projectConfig, c config) {
 			switch strings.TrimSpace(readLine()) {
 			case "1":
 				fmt.Printf("  fetching repo details from %s...", mirrorPlatform)
-				fetched, ferr := platformCreateRepo(c, mirrorPlatform, username, username, currentRepo, private)
+				fetched, ferr := platformCreateRepo(c, mirrorPlatform, owner, username, currentRepo, private)
 				if ferr == nil && fetched.HTMLURL != "" {
 					fmt.Println()
 					fmt.Printf("  found: %s\n", fetched.HTMLURL)
 					fmt.Printf("  use this repo? [Y/n] › ")
 					if ans := strings.ToLower(strings.TrimSpace(readLine())); ans != "n" && ans != "no" {
-						remoteURL = fetched.SSHURL
-						if !hasSSHKey(sshHostForPlatform(c, mirrorPlatform)) {
-							remoteURL = strings.TrimSuffix(fetched.HTMLURL, ".git") + ".git"
-						}
+						remoteURL = strings.TrimSuffix(fetched.HTMLURL, ".git") + ".git"
 					} else {
-						remoteURL = buildMirrorURL(c, mirrorPlatform, username, currentRepo)
+						remoteURL = buildMirrorURL(c, mirrorPlatform, owner, currentRepo)
 					}
 				} else {
 					fmt.Println()
-					remoteURL = buildMirrorURL(c, mirrorPlatform, username, currentRepo)
+					remoteURL = buildMirrorURL(c, mirrorPlatform, owner, currentRepo)
 				}
 				fmt.Printf("  using %s\n\n", remoteURL)
 			case "2":
@@ -554,16 +583,13 @@ func addMirrorPlatform(proj projectConfig, c config) {
 				}
 				currentRepo = newName
 				fmt.Printf("  creating repo...")
-				repo, err = platformCreateRepo(c, mirrorPlatform, username, username, currentRepo, private)
+				repo, err = platformCreateRepo(c, mirrorPlatform, owner, username, currentRepo, private)
 				if err != nil {
 					fmt.Println()
 					fatal("failed to create repo: %v", err)
 				}
 				fmt.Printf("\n  ✓ repo created: %s\n\n", repo.HTMLURL)
-				remoteURL = repo.SSHURL
-				if !hasSSHKey(sshHostForPlatform(c, mirrorPlatform)) {
-					remoteURL = strings.TrimSuffix(repo.HTMLURL, ".git") + ".git"
-				}
+				remoteURL = strings.TrimSuffix(repo.HTMLURL, ".git") + ".git"
 			default:
 				fmt.Println("  cancelled.")
 				return
