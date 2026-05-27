@@ -106,9 +106,14 @@ func detectAndRecover(stderr string) *recovery {
 	}
 
 	if strings.Contains(msg, "could not read username") || strings.Contains(msg, "terminal prompts disabled") {
+		remoteURL := getRemoteURL("origin")
+		hint := "check your token is set — run 'commitdog setup'"
+		if remoteURL != "" {
+			hint = "run 'commitdog setup' to configure token for this platform"
+		}
 		return &recovery{
-			message: "git is asking for credentials interactively — not supported in this context",
-			hint:    "switch to SSH: git remote set-url origin git@github.com:user/repo.git",
+			message: "git is asking for credentials interactively — token may be missing or expired",
+			hint:    hint,
 		}
 	}
 
@@ -189,9 +194,16 @@ func autoResolveConflict() error {
 	}
 	remote := remotes[0]
 	branch := getCurrentBranch()
+	authHeader := currentAuthHeader()
 
 	fmt.Println("  pulling latest changes...")
-	pullCmd := exec.Command("git", "pull", "--rebase", remote, branch)
+	pullArgs := []string{"pull", "--rebase", remote, branch}
+	var pullCmd *exec.Cmd
+	if authHeader != "" {
+		pullCmd = exec.Command("git", append([]string{"-c", "http.extraHeader=Authorization: " + authHeader}, pullArgs...)...)
+	} else {
+		pullCmd = exec.Command("git", pullArgs...)
+	}
 	pullCmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
 	var pullStderr bytes.Buffer
 	pullCmd.Stderr = &pullStderr
@@ -229,9 +241,16 @@ func autoSyncAndRetry() error {
 	}
 	remote := remotes[0]
 	branch := getCurrentBranch()
+	authHeader := currentAuthHeader()
 
 	fmt.Printf("  pulling %s/%s...", remote, branch)
-	pullCmd := exec.Command("git", "pull", "--rebase", remote, branch)
+	pullArgs := []string{"pull", "--rebase", remote, branch}
+	var pullCmd *exec.Cmd
+	if authHeader != "" {
+		pullCmd = exec.Command("git", append([]string{"-c", "http.extraHeader=Authorization: " + authHeader}, pullArgs...)...)
+	} else {
+		pullCmd = exec.Command("git", pullArgs...)
+	}
 	pullCmd.Env = append(os.Environ(), "GIT_PAGER=cat", "GIT_TERMINAL_PROMPT=0")
 	var pullStderr bytes.Buffer
 	pullCmd.Stderr = &pullStderr
